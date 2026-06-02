@@ -89,6 +89,8 @@ export default function Home() {
   const [rStatus, setRStatus] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [rMessage, setRMessage] = useState("");
   const [rConvertedCount, setRConvertedCount] = useState(0);
+  const [rRecipeConvertedCount, setRRecipeConvertedCount] = useState(0);
+  const [rSubtopicConvertedCount, setRSubtopicConvertedCount] = useState(0);
   const [rWarnings, setRWarnings] = useState<string[]>([]);
   const [rUnmatchedLines, setRUnmatchedLines] = useState<string[]>([]);
   const [rSkippedH1Count, setRSkippedH1Count] = useState(0);
@@ -263,6 +265,8 @@ export default function Home() {
     setRMessage("Reading document and analyzing recipe contents...");
     setRWarnings([]);
     setROriginalSize(rMainFile.size);
+    setRRecipeConvertedCount(0);
+    setRSubtopicConvertedCount(0);
     setRUnmatchedLines([]);
     setRSkippedH1Count(0);
     setROutlineLinesCount(0);
@@ -297,7 +301,7 @@ export default function Home() {
       }
 
       setRMessage("Detecting recipe titles, instructions, and list elements...");
-      const { blob, convertedCount, unmatchedLines, skippedH1Count, warnings } = await processDocxHeadings(
+      const { blob, convertedCount, recipeConvertedCount, subtopicConvertedCount, unmatchedLines, skippedH1Count, warnings } = await processDocxHeadings(
         rMainFile,
         outlineLines,
         true // isRecipeBook = true
@@ -305,6 +309,8 @@ export default function Home() {
 
       setROutputSize(blob.size);
       setRConvertedCount(convertedCount);
+      setRRecipeConvertedCount(recipeConvertedCount);
+      setRSubtopicConvertedCount(subtopicConvertedCount);
       setRUnmatchedLines(unmatchedLines);
       setRSkippedH1Count(skippedH1Count);
       setRWarnings((prev) => [...prev, ...warnings]);
@@ -752,7 +758,9 @@ export default function Home() {
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-2 text-slate-600">
                         <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
                           <div>Total outline lines: <span className="font-bold text-slate-900">{rUsedOutline ? rOutlineLinesCount : "N/A (Auto)"}</span></div>
-                          <div>Headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
+                          <div>Recipe names converted: <span className="font-bold text-slate-900">{rRecipeConvertedCount}</span></div>
+                          <div>Other chapter subtopics converted: <span className="font-bold text-slate-900">{rSubtopicConvertedCount}</span></div>
+                          <div>Total H2 headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
                           <div>Skipped H1 matches: <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
                           <div>Unmatched outlines: <span className="font-bold text-slate-900">{rUsedOutline ? rUnmatchedLines.length : 0}</span></div>
                           <div>Original file size: <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
@@ -777,7 +785,7 @@ export default function Home() {
                         )}
 
                         <div className="text-emerald-700 font-semibold flex items-center pt-1 border-t border-slate-200/40 font-semibold">
-                          ✓ No text was rewritten. Only Heading 2 style and bold-off formatting were applied.
+                          ✓ No text was rewritten. Recipe names and chapter subtopics were formatted as Heading 2 with bold OFF.
                         </div>
 
                         {rConvertedCount === 0 && rMainFile && (

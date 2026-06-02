@@ -165,6 +165,40 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
 }
 
+// Helper to check if a paragraph at a given index is followed by recipe content
+export function isRecipeHeading(allPs: Element[], index: number): boolean {
+  let checkIndex = index + 1;
+  let nonMetadataCount = 0;
+
+  // Check next 5 paragraphs
+  while (checkIndex < allPs.length && nonMetadataCount < 5) {
+    const nextP = allPs[checkIndex];
+    const nextText = getParagraphText(nextP).trim();
+    if (nextText.length > 0) {
+      // If the next paragraph is a Heading 1 or Heading 2, the section has ended
+      if (isHeading1(nextP) || isHeading2(nextP)) {
+        break;
+      }
+      nonMetadataCount++;
+      
+      // Key terms indicating a recipe follows
+      const hasKeywords = /^(ingredients|directions|instructions|method|preparation|servings|prep\s*time|cook\s*time|nutrition|calories)/i.test(nextText);
+      
+      // Ingredient measurements list (e.g. 1 cup, 1/2 tsp, 2 large, etc.)
+      const hasIngredientsList = /^\d+[\s\d\/¼½¾.,-]*\s*(cup|tbsp|tsp|gram|g|oz|ml|pound|lb|pinch|can|clove|slice|teaspoon|tablespoon|piece|pkg|large|medium|small|head|cloves|slices|cans|grams|ounces|ml|cups|tablespoons|teaspoons)/i.test(nextText);
+      
+      // Numbered cooking instructions (e.g. 1. Mix, Step 2: Heat)
+      const hasNumberedSteps = /^(step\s*\d+|\d+\s*[\.\)-])/i.test(nextText);
+
+      if (hasKeywords || hasIngredientsList || hasNumberedSteps) {
+        return true;
+      }
+    }
+    checkIndex++;
+  }
+  return false;
+}
+
 // Main logic to parse a docx archive, identify headings, and rewrite word/document.xml
 export async function processDocxHeadings(
   docxFile: File,
@@ -173,6 +207,8 @@ export async function processDocxHeadings(
 ): Promise<{
   blob: Blob;
   convertedCount: number;
+  recipeConvertedCount: number;
+  subtopicConvertedCount: number;
   unmatchedLines: string[];
   skippedH1Count: number;
   warnings: string[];
@@ -192,6 +228,8 @@ export async function processDocxHeadings(
   const allPs = getDescendantsByLocalName(doc.documentElement, "p");
 
   let convertedCount = 0;
+  let recipeConvertedCount = 0;
+  let subtopicConvertedCount = 0;
   let skippedH1Count = 0;
   const unmatchedLines: string[] = [];
   const warnings: string[] = [];
@@ -227,6 +265,13 @@ export async function processDocxHeadings(
             if (!convertedIndices.has(match.index)) {
               applyH2AndUnbold(doc, match.pElement);
               convertedCount++;
+              if (isRecipeBook) {
+                if (isRecipeHeading(allPs, match.index)) {
+                  recipeConvertedCount++;
+                } else {
+                  subtopicConvertedCount++;
+                }
+              }
               convertedIndices.add(match.index);
             }
           }
@@ -246,6 +291,13 @@ export async function processDocxHeadings(
             if (!convertedIndices.has(match.index)) {
               applyH2AndUnbold(doc, match.pElement);
               convertedCount++;
+              if (isRecipeBook) {
+                if (isRecipeHeading(allPs, match.index)) {
+                  recipeConvertedCount++;
+                } else {
+                  subtopicConvertedCount++;
+                }
+              }
               convertedIndices.add(match.index);
             }
           }
@@ -278,42 +330,16 @@ export async function processDocxHeadings(
       // Automatic mode must skip bullets, indents, and existing H2s
       if (!isBullet && !isInd && !isAlreadyH2) {
         let shouldConvert = false;
+        let isRecipe = false;
 
         if (isRecipeBook) {
           // Recipe Book Heuristics
-          // 1. Check if followed by recipe content (ingredients, directions, servings, cooking steps)
-          let hasRecipeIndicators = false;
-          let checkIndex = i + 1;
-          let nonMetadataCount = 0;
-
-          // Check next 5 paragraphs
-          while (checkIndex < allPs.length && nonMetadataCount < 5) {
-            const nextText = getParagraphText(allPs[checkIndex]).trim();
-            if (nextText.length > 0) {
-              nonMetadataCount++;
-              
-              // Key terms indicating a recipe follows
-              const hasKeywords = /^(ingredients|directions|instructions|method|preparation|servings|prep\s*time|cook\s*time|nutrition|calories)/i.test(nextText);
-              
-              // Ingredient measurements list (e.g. 1 cup, 1/2 tsp, 2 large, etc.)
-              const hasIngredientsList = /^\d+[\s\d\/¼½¾.,-]*\s*(cup|tbsp|tsp|gram|g|oz|ml|pound|lb|pinch|can|clove|slice|teaspoon|tablespoon|piece|pkg|large|medium|small|head|cloves|slices|cans|grams|ounces|ml|cups|tablespoons|teaspoons)/i.test(nextText);
-              
-              // Numbered cooking instructions (e.g. 1. Mix, Step 2: Heat)
-              const hasNumberedSteps = /^(step\s*\d+|\d+\s*[\.\)-])/i.test(nextText);
-
-              if (hasKeywords || hasIngredientsList || hasNumberedSteps) {
-                hasRecipeIndicators = true;
-                break;
-              }
-            }
-            checkIndex++;
-          }
-
-          if (hasRecipeIndicators) {
+          if (isRecipeHeading(allPs, i)) {
             shouldConvert = true;
-          } else {
-            // Check if it's a chapter subtopic of other chapters (same as non-recipe book rule)
-            shouldConvert = checkNonRecipeHeuristic(allPs, i);
+            isRecipe = true;
+          } else if (checkNonRecipeHeuristic(allPs, i)) {
+            shouldConvert = true;
+            isRecipe = false;
           }
         } else {
           // Non-Recipe Book Heuristics
@@ -323,6 +349,13 @@ export async function processDocxHeadings(
         if (shouldConvert) {
           applyH2AndUnbold(doc, p);
           convertedCount++;
+          if (isRecipeBook) {
+            if (isRecipe) {
+              recipeConvertedCount++;
+            } else {
+              subtopicConvertedCount++;
+            }
+          }
         }
       }
     }
@@ -346,7 +379,7 @@ export async function processDocxHeadings(
     compression: "DEFLATE",
     compressionOptions: { level: 6 }
   });
-  return { blob, convertedCount, unmatchedLines, skippedH1Count, warnings };
+  return { blob, convertedCount, recipeConvertedCount, subtopicConvertedCount, unmatchedLines, skippedH1Count, warnings };
 }
 
 // Conservative check for Non-Recipe headings
