@@ -52,19 +52,12 @@ export async function convertImageToJpg(blob: Blob): Promise<Blob> {
   });
 }
 
-interface ExtractionResult {
-  fileName: string;
-  totalFound: number;
-  totalConverted: number;
-  failures: string[];
-  unsupported: string[];
-}
-
 export async function extractImagesFromFiles(
   files: File[],
   onProgress: (status: string) => void
-): Promise<Blob> {
+): Promise<{ blob: Blob; warnings: string[] }> {
   const masterZip = new JSZip();
+  const warnings: string[] = [];
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const file = files[fileIndex];
@@ -72,19 +65,6 @@ export async function extractImagesFromFiles(
 
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
     const folderName = file.name.replace(/\s+/g, "_") + "_extracted";
-    const fileFolder = masterZip.folder(folderName);
-
-    if (!fileFolder) {
-      throw new Error(`Failed to create directory in zip for ${file.name}`);
-    }
-
-    const result: ExtractionResult = {
-      fileName: file.name,
-      totalFound: 0,
-      totalConverted: 0,
-      failures: [],
-      unsupported: [],
-    };
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -123,92 +103,47 @@ export async function extractImagesFromFiles(
             // For standard ZIPs, scan all directories
             imageFiles.push({ relativePath, fileObj });
           }
-        } else {
-          // If we are scanning media folders and find non-images or general zip scanning
-          if (!isOfficeFile) {
-            result.unsupported.push(`${relativePath} (Not an image format)`);
-          }
         }
       });
 
-      result.totalFound = imageFiles.length;
+      if (imageFiles.length === 0) {
+        warnings.push(`No images found in ${file.name}.`);
+      } else {
+        const fileFolder = masterZip.folder(folderName);
+        if (!fileFolder) {
+          throw new Error(`Failed to create directory in zip for ${file.name}`);
+        }
 
-      // Extract and convert each image
-      for (let imgIdx = 0; imgIdx < imageFiles.length; imgIdx++) {
-        const { relativePath, fileObj } = imageFiles[imgIdx];
-        const fileExt = relativePath.split(".").pop()?.toLowerCase() || "";
-        const imageNumber = String(imgIdx + 1).padStart(3, "0");
-        const outFileName = `image-${imageNumber}.jpg`;
+        let savedCount = 0;
 
-        onProgress(`File ${fileIndex + 1}/${files.length} (${file.name}): Converting image ${imgIdx + 1}/${imageFiles.length}...`);
+        // Extract and convert each image
+        for (let imgIdx = 0; imgIdx < imageFiles.length; imgIdx++) {
+          const { relativePath, fileObj } = imageFiles[imgIdx];
+          
+          onProgress(`File ${fileIndex + 1}/${files.length} (${file.name}): Converting image ${imgIdx + 1}/${imageFiles.length}...`);
 
-        try {
-          const imgBlob = await fileObj.async("blob");
-          const convertedBlob = await convertImageToJpg(imgBlob);
-
-          fileFolder.file(outFileName, convertedBlob);
-          result.totalConverted++;
-        } catch (error: unknown) {
-          // Fallback: save original format if canvas conversion fails
-          const fallbackName = `image-${imageNumber}.${fileExt}`;
-          const errMsg = error instanceof Error ? error.message : String(error);
           try {
-            const originalBlob = await fileObj.async("blob");
-            fileFolder.file(fallbackName, originalBlob);
-            result.failures.push(
-              `${relativePath} - Conversion failed (${errMsg}). Copied original file as ${fallbackName}.`
-            );
-          } catch (readError: unknown) {
-            const readErrMsg = readError instanceof Error ? readError.message : String(readError);
-            result.failures.push(
-              `${relativePath} - Critical read failure: ${readErrMsg}`
-            );
+            const imgBlob = await fileObj.async("blob");
+            const convertedBlob = await convertImageToJpg(imgBlob);
+
+            const imageNumber = String(savedCount + 1).padStart(3, "0");
+            const outFileName = `image-${imageNumber}.jpg`;
+            fileFolder.file(outFileName, convertedBlob);
+            savedCount++;
+          } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            warnings.push(`Failed to convert image ${relativePath} in ${file.name} to JPG: ${errMsg}`);
           }
         }
       }
     } catch (zipError: unknown) {
       const zipErrMsg = zipError instanceof Error ? zipError.message : String(zipError);
-      result.failures.push(`Archive reading error: ${zipErrMsg}`);
+      warnings.push(`Archive reading error in ${file.name}: ${zipErrMsg}`);
     }
-
-    // Write report.txt inside the folder
-    const reportContent = generateReportText(result);
-    fileFolder.file("report.txt", reportContent);
   }
 
   onProgress("Packaging master ZIP archive...");
   const finalZipBlob = await masterZip.generateAsync({ type: "blob" });
   onProgress("Extraction completed successfully!");
-  return finalZipBlob;
-}
-
-function generateReportText(result: ExtractionResult): string {
-  let text = `====================================================\n`;
-  text += `IMAGE EXTRACTION REPORT\n`;
-  text += `====================================================\n`;
-  text += `Source Filename: ${result.fileName}\n`;
-  text += `Total Images Found: ${result.totalFound}\n`;
-  text += `Total Images Converted to JPG: ${result.totalConverted}\n\n`;
-
-  if (result.failures.length > 0) {
-    text += `Failed Conversions (copied in original format):\n`;
-    result.failures.forEach((fail) => {
-      text += `- ${fail}\n`;
-    });
-    text += `\n`;
-  } else {
-    text += `Failed Conversions: None\n\n`;
-  }
-
-  if (result.unsupported.length > 0) {
-    text += `Ignored Archive Files (Non-image files in ZIP):\n`;
-    result.unsupported.forEach((file) => {
-      text += `- ${file}\n`;
-    });
-  } else {
-    text += `Ignored Archive Files: None\n`;
-  }
-
-  text += `====================================================\n`;
-  return text;
+  return { blob: finalZipBlob, warnings };
 }

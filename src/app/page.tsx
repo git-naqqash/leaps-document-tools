@@ -104,6 +104,7 @@ export default function Home() {
   const [ieStatus, setIeStatus] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [ieMessage, setIeMessage] = useState("");
   const [ieLogs, setIeLogs] = useState<string[]>([]);
+  const [ieWarnings, setIeWarnings] = useState<string[]>([]);
   const ieInputRef = useRef<HTMLInputElement>(null);
 
   // Helper to trigger browser download
@@ -371,14 +372,16 @@ export default function Home() {
 
     setIeStatus("processing");
     setIeLogs([]);
+    setIeWarnings([]);
     setIeMessage("Starting media archive analysis...");
 
     try {
-      const masterBlob = await extractImagesFromFiles(ieFiles, (logText) => {
+      const { blob, warnings } = await extractImagesFromFiles(ieFiles, (logText) => {
         setIeLogs((prev) => [...prev, logText]);
       });
 
-      triggerDownload(masterBlob, "extracted-images-master.zip");
+      setIeWarnings(warnings);
+      triggerDownload(blob, "extracted-images-master.zip");
       setIeStatus("success");
       setIeMessage("Image extraction completed! Master ZIP file has been downloaded.");
     } catch (error: unknown) {
@@ -945,6 +948,16 @@ export default function Home() {
                       <div key={idx} className={log.includes("completed") ? "text-emerald-400" : log.includes("Converting") ? "text-blue-300" : "text-slate-300"}>
                         {log}
                       </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {ieWarnings.length > 0 && (
+                  <div className="mt-3 text-xs text-amber-700 space-y-1 bg-amber-50 p-2.5 rounded-lg border border-amber-100 font-semibold">
+                    <div className="flex items-center font-bold"><ExclamationIcon /> Warnings:</div>
+                    {ieWarnings.map((w, idx) => (
+                      <div key={idx} className="pl-6 font-medium">• {w}</div>
                     ))}
                   </div>
                 )}
