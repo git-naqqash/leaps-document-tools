@@ -70,24 +70,26 @@ function insertInOrder(parent: Element, newChild: Element, order: string[]) {
   parent.appendChild(newChild);
 }
 
-// Check if a paragraph has the Heading1 style
+// Check if a paragraph has the Heading1 style (case-insensitive check)
 export function isHeading1(p: Element): boolean {
   const pPr = findChildByLocalName(p, "pPr");
   if (!pPr) return false;
   const pStyle = findChildByLocalName(pPr, "pStyle");
   if (!pStyle) return false;
   const val = pStyle.getAttribute("w:val") || pStyle.getAttribute("val") || "";
-  return val.toLowerCase() === "heading1" || val.toLowerCase() === "heading 1";
+  const lowerVal = val.toLowerCase();
+  return lowerVal === "heading1" || lowerVal === "heading 1";
 }
 
-// Check if a paragraph has the Heading2 style
+// Check if a paragraph has the Heading2 style (case-insensitive check)
 export function isHeading2(p: Element): boolean {
   const pPr = findChildByLocalName(p, "pPr");
   if (!pPr) return false;
   const pStyle = findChildByLocalName(pPr, "pStyle");
   if (!pStyle) return false;
   const val = pStyle.getAttribute("w:val") || pStyle.getAttribute("val") || "";
-  return val.toLowerCase() === "heading2" || val.toLowerCase() === "heading 2";
+  const lowerVal = val.toLowerCase();
+  return lowerVal === "heading2" || lowerVal === "heading 2";
 }
 
 // Checks if a paragraph is styled or written as a list bullet
@@ -97,24 +99,23 @@ export function isBulletOrListItem(p: Element): boolean {
     return true;
   }
   const text = getParagraphText(p).trim();
-  // Starts with list/bullet indicators
-  return /^[•\-\*o▪\u2013\u2014]/.test(text);
+  // Starts with list/bullet indicators: •, -, *, ●, ○
+  return /^[•\-*●○]/.test(text);
 }
 
-// Checks if a paragraph is explicitly indented in its XML properties
+// Checks if a paragraph is explicitly indented in its XML properties (left, start, firstLine, hanging)
 export function isIndented(p: Element): boolean {
   const pPr = findChildByLocalName(p, "pPr");
   if (!pPr) return false;
   const ind = findChildByLocalName(pPr, "ind");
   if (ind) {
-    const left = ind.getAttribute("w:left") || ind.getAttribute("left");
-    if (left && parseInt(left, 10) > 200) {
+    const hasLeft = ind.hasAttribute("w:left") || ind.hasAttribute("left");
+    const hasStart = ind.hasAttribute("w:start") || ind.hasAttribute("start");
+    const hasFirstLine = ind.hasAttribute("w:firstLine") || ind.hasAttribute("firstLine");
+    const hasHanging = ind.hasAttribute("w:hanging") || ind.hasAttribute("hanging");
+
+    if (hasLeft || hasStart || hasFirstLine || hasHanging) {
       return true;
-    }
-    const firstLine = ind.getAttribute("w:firstLine") || ind.getAttribute("firstLine");
-    if (firstLine && parseInt(firstLine, 10) > 200) {
-      // In some cases first line indentation might be part of list formatting,
-      // but let's stick primarily to left indent to avoid false positives for first-line paragraph indents.
     }
   }
   return false;
@@ -137,7 +138,7 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
   pStyle.setAttributeNS(wNamespace, "w:val", "Heading2");
 
-  // 3. Process all run elements (w:r)
+  // 3. Process all run elements (w:r) to turn bold off
   const runs = getDescendantsByLocalName(p, "r");
   for (const r of runs) {
     let rPr = findChildByLocalName(r, "rPr");
@@ -172,6 +173,8 @@ export async function processDocxHeadings(
 ): Promise<{
   blob: Blob;
   convertedCount: number;
+  unmatchedLines: string[];
+  skippedH1Count: number;
   warnings: string[];
 }> {
   const arrayBuffer = await docxFile.arrayBuffer();
@@ -189,35 +192,93 @@ export async function processDocxHeadings(
   const allPs = getDescendantsByLocalName(doc.documentElement, "p");
 
   let convertedCount = 0;
+  let skippedH1Count = 0;
+  const unmatchedLines: string[] = [];
   const warnings: string[] = [];
 
-  const outlineSet = outlineLines
-    ? new Set(outlineLines.map(line => line.toLowerCase().trim()))
+  const cleanOutlineLines = outlineLines
+    ? outlineLines.map(line => line.trim()).filter(line => line.length > 0)
     : null;
 
-  for (let i = 0; i < allPs.length; i++) {
-    const p = allPs[i];
-    const text = getParagraphText(p).trim();
+  if (cleanOutlineLines) {
+    // --- OPTION 1: OUTLINE MODE ---
+    // Cache text and H1 details of all document paragraphs
+    const paragraphsInfo = allPs.map((p, idx) => ({
+      index: idx,
+      pElement: p,
+      text: getParagraphText(p).trim(),
+      isH1: isHeading1(p)
+    })).filter(info => info.text.length > 0);
 
-    // Skip empty lines, Heading 1, and existing Heading 2 (to prevent double counting or modification)
-    if (text.length === 0 || isHeading1(p)) {
-      continue;
-    }
+    const convertedIndices = new Set<number>();
 
-    let shouldConvert = false;
+    for (const line of cleanOutlineLines) {
+      let isLineMatched = false;
 
-    if (outlineSet) {
-      // Option 1: Outline provided. Match text exactly (case-insensitive)
-      if (outlineSet.has(text.toLowerCase())) {
-        shouldConvert = true;
+      // 1. Try exact case-sensitive match
+      const caseSensitiveMatches = paragraphsInfo.filter(info => info.text === line);
+
+      if (caseSensitiveMatches.length > 0) {
+        isLineMatched = true;
+        for (const match of caseSensitiveMatches) {
+          if (match.isH1) {
+            skippedH1Count++;
+          } else {
+            if (!convertedIndices.has(match.index)) {
+              applyH2AndUnbold(doc, match.pElement);
+              convertedCount++;
+              convertedIndices.add(match.index);
+            }
+          }
+        }
+      } else {
+        // 2. Try safe fallback case-insensitive match only if exactly one matches
+        const caseInsensitiveMatches = paragraphsInfo.filter(
+          info => info.text.toLowerCase() === line.toLowerCase()
+        );
+
+        if (caseInsensitiveMatches.length === 1) {
+          isLineMatched = true;
+          const match = caseInsensitiveMatches[0];
+          if (match.isH1) {
+            skippedH1Count++;
+          } else {
+            if (!convertedIndices.has(match.index)) {
+              applyH2AndUnbold(doc, match.pElement);
+              convertedCount++;
+              convertedIndices.add(match.index);
+            }
+          }
+        }
       }
-    } else {
-      // Option 2: No outline provided. Apply heuristics.
+
+      if (!isLineMatched) {
+        unmatchedLines.push(line);
+      }
+    }
+  } else {
+    // --- OPTION 2: AUTOMATIC DETECTION MODE ---
+    for (let i = 0; i < allPs.length; i++) {
+      const p = allPs[i];
+      const text = getParagraphText(p).trim();
+
+      // Skip empty lines and H1 paragraphs
+      if (text.length === 0 || isHeading1(p)) {
+        if (text.length > 0 && isHeading1(p)) {
+          // If we encounter a Heading 1 under automatic mode, count it for the skipped logs
+          skippedH1Count++;
+        }
+        continue;
+      }
+
       const isBullet = isBulletOrListItem(p);
       const isInd = isIndented(p);
       const isAlreadyH2 = isHeading2(p);
 
+      // Automatic mode must skip bullets, indents, and existing H2s
       if (!isBullet && !isInd && !isAlreadyH2) {
+        let shouldConvert = false;
+
         if (isRecipeBook) {
           // Recipe Book Heuristics
           // 1. Check if followed by recipe content (ingredients, directions, servings, cooking steps)
@@ -258,12 +319,12 @@ export async function processDocxHeadings(
           // Non-Recipe Book Heuristics
           shouldConvert = checkNonRecipeHeuristic(allPs, i);
         }
-      }
-    }
 
-    if (shouldConvert) {
-      applyH2AndUnbold(doc, p);
-      convertedCount++;
+        if (shouldConvert) {
+          applyH2AndUnbold(doc, p);
+          convertedCount++;
+        }
+      }
     }
   }
 
@@ -271,7 +332,7 @@ export async function processDocxHeadings(
     warnings.push("No clear H2 candidates found. No changes made.");
   }
 
-  // Serialize DOM back to XML string
+  // Serialize DOM back to XML string without modifying spacing/trimming in the source w:t nodes
   const serializer = new XMLSerializer();
   const updatedXmlText = serializer.serializeToString(doc);
 
@@ -280,7 +341,7 @@ export async function processDocxHeadings(
 
   // Generate output Blob
   const blob = await zip.generateAsync({ type: "blob" });
-  return { blob, convertedCount, warnings };
+  return { blob, convertedCount, unmatchedLines, skippedH1Count, warnings };
 }
 
 // Conservative check for Non-Recipe headings
@@ -288,7 +349,7 @@ function checkNonRecipeHeuristic(allPs: Element[], index: number): boolean {
   const p = allPs[index];
   const text = getParagraphText(p).trim();
 
-  // Basic checks
+  // Basic title length bounds
   if (text.length < 3 || text.length > 80) return false;
   
   // Word count check (1 to 12 words)

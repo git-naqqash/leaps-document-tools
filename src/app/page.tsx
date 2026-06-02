@@ -58,20 +58,30 @@ export default function Home() {
   // --- STATE FOR NON-RECIPE BOOK H2 MAKER (1A) ---
   const [nrMainFile, setNrMainFile] = useState<File | null>(null);
   const [nrOutlineFile, setNrOutlineFile] = useState<File | null>(null);
+  const [nrOutlineText, setNrOutlineText] = useState("");
   const [nrStatus, setNrStatus] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [nrMessage, setNrMessage] = useState("");
   const [nrConvertedCount, setNrConvertedCount] = useState(0);
   const [nrWarnings, setNrWarnings] = useState<string[]>([]);
+  const [nrUnmatchedLines, setNrUnmatchedLines] = useState<string[]>([]);
+  const [nrSkippedH1Count, setNrSkippedH1Count] = useState(0);
+  const [nrOutlineLinesCount, setNrOutlineLinesCount] = useState(0);
+  const [nrUsedOutline, setNrUsedOutline] = useState(false);
   const nrMainInputRef = useRef<HTMLInputElement>(null);
   const nrOutlineInputRef = useRef<HTMLInputElement>(null);
 
   // --- STATE FOR RECIPE BOOK H2 MAKER (1B) ---
   const [rMainFile, setRMainFile] = useState<File | null>(null);
   const [rOutlineFile, setROutlineFile] = useState<File | null>(null);
+  const [rOutlineText, setROutlineText] = useState("");
   const [rStatus, setRStatus] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [rMessage, setRMessage] = useState("");
   const [rConvertedCount, setRConvertedCount] = useState(0);
   const [rWarnings, setRWarnings] = useState<string[]>([]);
+  const [rUnmatchedLines, setRUnmatchedLines] = useState<string[]>([]);
+  const [rSkippedH1Count, setRSkippedH1Count] = useState(0);
+  const [rOutlineLinesCount, setROutlineLinesCount] = useState(0);
+  const [rUsedOutline, setRUsedOutline] = useState(false);
   const rMainInputRef = useRef<HTMLInputElement>(null);
   const rOutlineInputRef = useRef<HTMLInputElement>(null);
 
@@ -83,8 +93,8 @@ export default function Home() {
   const ieInputRef = useRef<HTMLInputElement>(null);
 
   // Helper to trigger browser download
-  const triggerDownload = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
+  const triggerDownload = (fileOrBlob: Blob | File, filename: string) => {
+    const url = URL.createObjectURL(fileOrBlob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
@@ -135,25 +145,49 @@ export default function Home() {
     setNrStatus("processing");
     setNrMessage("Reading document and processing Heading 2 nodes...");
     setNrWarnings([]);
+    setNrUnmatchedLines([]);
+    setNrSkippedH1Count(0);
+    setNrOutlineLinesCount(0);
+    setNrUsedOutline(false);
 
     try {
       let outlineLines: string[] | null = null;
-      if (nrOutlineFile) {
+      let usedOutline = false;
+
+      // 1. Priority check: manual outline text box first
+      const cleanManualLines = nrOutlineText
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      if (cleanManualLines.length > 0) {
+        outlineLines = cleanManualLines;
+        usedOutline = true;
+        setNrOutlineLinesCount(cleanManualLines.length);
+        setNrUsedOutline(true);
+      } else if (nrOutlineFile) {
+        // 2. Optional outline file upload second
         setNrMessage("Parsing outline file...");
-        outlineLines = await parseOutlineFile(nrOutlineFile);
+        const fileLines = await parseOutlineFile(nrOutlineFile);
+        outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
+        usedOutline = true;
+        setNrOutlineLinesCount(outlineLines.length);
+        setNrUsedOutline(true);
         if (outlineLines.length === 0) {
           setNrWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
       }
 
       setNrMessage("Identifying non-recipe heading structures and unbolding...");
-      const { blob, convertedCount, warnings } = await processDocxHeadings(
+      const { blob, convertedCount, unmatchedLines, skippedH1Count, warnings } = await processDocxHeadings(
         nrMainFile,
         outlineLines,
         false // isRecipeBook = false
       );
 
       setNrConvertedCount(convertedCount);
+      setNrUnmatchedLines(unmatchedLines);
+      setNrSkippedH1Count(skippedH1Count);
       setNrWarnings((prev) => [...prev, ...warnings]);
 
       if (convertedCount === 0) {
@@ -214,25 +248,49 @@ export default function Home() {
     setRStatus("processing");
     setRMessage("Reading document and analyzing recipe contents...");
     setRWarnings([]);
+    setRUnmatchedLines([]);
+    setRSkippedH1Count(0);
+    setROutlineLinesCount(0);
+    setRUsedOutline(false);
 
     try {
       let outlineLines: string[] | null = null;
-      if (rOutlineFile) {
+      let usedOutline = false;
+
+      // 1. Priority check: manual outline text box first
+      const cleanManualLines = rOutlineText
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      if (cleanManualLines.length > 0) {
+        outlineLines = cleanManualLines;
+        usedOutline = true;
+        setROutlineLinesCount(cleanManualLines.length);
+        setRUsedOutline(true);
+      } else if (rOutlineFile) {
+        // 2. Optional outline file upload second
         setRMessage("Parsing recipe outline file...");
-        outlineLines = await parseOutlineFile(rOutlineFile);
+        const fileLines = await parseOutlineFile(rOutlineFile);
+        outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
+        usedOutline = true;
+        setROutlineLinesCount(outlineLines.length);
+        setRUsedOutline(true);
         if (outlineLines.length === 0) {
           setRWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
       }
 
       setRMessage("Detecting recipe titles, instructions, and list elements...");
-      const { blob, convertedCount, warnings } = await processDocxHeadings(
+      const { blob, convertedCount, unmatchedLines, skippedH1Count, warnings } = await processDocxHeadings(
         rMainFile,
         outlineLines,
         true // isRecipeBook = true
       );
 
       setRConvertedCount(convertedCount);
+      setRUnmatchedLines(unmatchedLines);
+      setRSkippedH1Count(skippedH1Count);
       setRWarnings((prev) => [...prev, ...warnings]);
 
       if (convertedCount === 0) {
@@ -268,10 +326,8 @@ export default function Home() {
       setIeMessage("");
     }
 
-    // Accumulate unique files
     setIeFiles((prev) => {
       const all = [...prev, ...validFiles];
-      // Filter unique by name and size
       return all.filter((v, i, a) => a.findIndex((t) => t.name === v.name && t.size === v.size) === i);
     });
   };
@@ -399,6 +455,20 @@ export default function Home() {
                     )}
                   </div>
 
+                  {/* Manual Outline Text Area */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Paste Outline / Subtopics Here
+                    </label>
+                    <textarea
+                      value={nrOutlineText}
+                      onChange={(e) => setNrOutlineText(e.target.value)}
+                      placeholder="Paste each H2 heading, recipe name, or subtopic on a separate line."
+                      rows={4}
+                      className="w-full p-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono bg-slate-50/30"
+                    />
+                  </div>
+
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
@@ -466,9 +536,37 @@ export default function Home() {
                     </div>
 
                     {nrStatus === "success" && (
-                      <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-1 text-slate-600">
-                        <div>Paragraphs styled to H2: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
-                        <div className="text-emerald-700 font-medium">✓ No text was rewritten. Only Heading 2 style and bold-off formatting were applied.</div>
+                      <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-2 text-slate-600">
+                        <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
+                          <div>Total outline lines: <span className="font-bold text-slate-900">{nrUsedOutline ? nrOutlineLinesCount : "N/A (Auto)"}</span></div>
+                          <div>Headings converted: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
+                          <div>Skipped H1 matches: <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
+                          <div>Unmatched outlines: <span className="font-bold text-slate-900">{nrUsedOutline ? nrUnmatchedLines.length : 0}</span></div>
+                        </div>
+
+                        {nrUsedOutline && nrUnmatchedLines.length > 0 && (
+                          <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                            <span className="font-bold text-amber-800 block mb-1">Unmatched Outline Lines:</span>
+                            <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1">
+                              {nrUnmatchedLines.map((line, idx) => (
+                                <div key={idx}>• {line}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="text-emerald-700 font-semibold flex items-center pt-1 border-t border-slate-200/40">
+                          ✓ No text was rewritten. Only Heading 2 style and bold-off formatting were applied.
+                        </div>
+
+                        {nrConvertedCount === 0 && nrMainFile && (
+                          <button
+                            onClick={() => triggerDownload(nrMainFile, nrMainFile.name)}
+                            className="mt-3 w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg border border-slate-200 transition text-center"
+                          >
+                            Download unchanged file
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -546,6 +644,20 @@ export default function Home() {
                     )}
                   </div>
 
+                  {/* Manual Outline Text Area */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Paste Outline / Subtopics Here
+                    </label>
+                    <textarea
+                      value={rOutlineText}
+                      onChange={(e) => setROutlineText(e.target.value)}
+                      placeholder="Paste each H2 heading, recipe name, or subtopic on a separate line."
+                      rows={4}
+                      className="w-full p-3 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono bg-slate-50/30"
+                    />
+                  </div>
+
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
@@ -613,9 +725,37 @@ export default function Home() {
                     </div>
 
                     {rStatus === "success" && (
-                      <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-1 text-slate-600">
-                        <div>Recipe/Subtopic headings styled: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
-                        <div className="text-emerald-700 font-medium font-semibold">✓ No text was rewritten. Only Heading 2 style and bold-off formatting were applied.</div>
+                      <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-2 text-slate-600">
+                        <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
+                          <div>Total outline lines: <span className="font-bold text-slate-900">{rUsedOutline ? rOutlineLinesCount : "N/A (Auto)"}</span></div>
+                          <div>Headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
+                          <div>Skipped H1 matches: <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
+                          <div>Unmatched outlines: <span className="font-bold text-slate-900">{rUsedOutline ? rUnmatchedLines.length : 0}</span></div>
+                        </div>
+
+                        {rUsedOutline && rUnmatchedLines.length > 0 && (
+                          <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                            <span className="font-bold text-amber-800 block mb-1">Unmatched Outline Lines:</span>
+                            <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1">
+                              {rUnmatchedLines.map((line, idx) => (
+                                <div key={idx}>• {line}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="text-emerald-700 font-semibold flex items-center pt-1 border-t border-slate-200/40 font-semibold">
+                          ✓ No text was rewritten. Only Heading 2 style and bold-off formatting were applied.
+                        </div>
+
+                        {rConvertedCount === 0 && rMainFile && (
+                          <button
+                            onClick={() => triggerDownload(rMainFile, rMainFile.name)}
+                            className="mt-3 w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-3 rounded-lg border border-slate-200 transition text-center"
+                          >
+                            Download unchanged file
+                          </button>
+                        )}
                       </div>
                     )}
 
