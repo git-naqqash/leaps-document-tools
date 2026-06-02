@@ -339,8 +339,13 @@ export async function processDocxHeadings(
   // Write updated XML back to ZIP
   zip.file(documentXmlPath, updatedXmlText);
 
-  // Generate output Blob
-  const blob = await zip.generateAsync({ type: "blob" });
+  // Generate output Blob with compression DEFLATE
+  const blob = await zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 }
+  });
   return { blob, convertedCount, unmatchedLines, skippedH1Count, warnings };
 }
 

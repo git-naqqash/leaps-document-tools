@@ -54,8 +54,18 @@ const TrashIcon = () => (
   </svg>
 );
 
+const formatSize = (bytes: number) => {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+};
+
 export default function Home() {
   // --- STATE FOR NON-RECIPE BOOK H2 MAKER (1A) ---
+  const [nrOriginalSize, setNrOriginalSize] = useState(0);
+  const [nrOutputSize, setNrOutputSize] = useState(0);
   const [nrMainFile, setNrMainFile] = useState<File | null>(null);
   const [nrOutlineFile, setNrOutlineFile] = useState<File | null>(null);
   const [nrOutlineText, setNrOutlineText] = useState("");
@@ -71,6 +81,8 @@ export default function Home() {
   const nrOutlineInputRef = useRef<HTMLInputElement>(null);
 
   // --- STATE FOR RECIPE BOOK H2 MAKER (1B) ---
+  const [rOriginalSize, setROriginalSize] = useState(0);
+  const [rOutputSize, setROutputSize] = useState(0);
   const [rMainFile, setRMainFile] = useState<File | null>(null);
   const [rOutlineFile, setROutlineFile] = useState<File | null>(null);
   const [rOutlineText, setROutlineText] = useState("");
@@ -145,6 +157,7 @@ export default function Home() {
     setNrStatus("processing");
     setNrMessage("Reading document and processing Heading 2 nodes...");
     setNrWarnings([]);
+    setNrOriginalSize(nrMainFile.size);
     setNrUnmatchedLines([]);
     setNrSkippedH1Count(0);
     setNrOutlineLinesCount(0);
@@ -185,6 +198,7 @@ export default function Home() {
         false // isRecipeBook = false
       );
 
+      setNrOutputSize(blob.size);
       setNrConvertedCount(convertedCount);
       setNrUnmatchedLines(unmatchedLines);
       setNrSkippedH1Count(skippedH1Count);
@@ -248,6 +262,7 @@ export default function Home() {
     setRStatus("processing");
     setRMessage("Reading document and analyzing recipe contents...");
     setRWarnings([]);
+    setROriginalSize(rMainFile.size);
     setRUnmatchedLines([]);
     setRSkippedH1Count(0);
     setROutlineLinesCount(0);
@@ -288,6 +303,7 @@ export default function Home() {
         true // isRecipeBook = true
       );
 
+      setROutputSize(blob.size);
       setRConvertedCount(convertedCount);
       setRUnmatchedLines(unmatchedLines);
       setRSkippedH1Count(skippedH1Count);
@@ -542,7 +558,15 @@ export default function Home() {
                           <div>Headings converted: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
                           <div>Skipped H1 matches: <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
                           <div>Unmatched outlines: <span className="font-bold text-slate-900">{nrUsedOutline ? nrUnmatchedLines.length : 0}</span></div>
+                          <div>Original file size: <span className="font-bold text-slate-900">{formatSize(nrOriginalSize)}</span></div>
+                          <div>Output file size: <span className="font-bold text-slate-900">{formatSize(nrOutputSize)}</span></div>
                         </div>
+
+                        {nrOutputSize > 2 * nrOriginalSize && (
+                          <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-lg p-2.5 font-semibold text-xs mt-2 flex items-center">
+                            <ErrorIcon /> Warning: Output file size increased unexpectedly. Please check compression settings.
+                          </div>
+                        )}
 
                         {nrUsedOutline && nrUnmatchedLines.length > 0 && (
                           <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5">
@@ -731,7 +755,15 @@ export default function Home() {
                           <div>Headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
                           <div>Skipped H1 matches: <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
                           <div>Unmatched outlines: <span className="font-bold text-slate-900">{rUsedOutline ? rUnmatchedLines.length : 0}</span></div>
+                          <div>Original file size: <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
+                          <div>Output file size: <span className="font-bold text-slate-900">{formatSize(rOutputSize)}</span></div>
                         </div>
+
+                        {rOutputSize > 2 * rOriginalSize && (
+                          <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-lg p-2.5 font-semibold text-xs mt-2 flex items-center">
+                            <ErrorIcon /> Warning: Output file size increased unexpectedly. Please check compression settings.
+                          </div>
+                        )}
 
                         {rUsedOutline && rUnmatchedLines.length > 0 && (
                           <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5">
