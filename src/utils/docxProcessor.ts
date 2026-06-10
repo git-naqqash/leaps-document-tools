@@ -165,6 +165,25 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
 }
 
+// Helper to normalize string for outline matching to handle numbering anomalies and whitespace
+export function normalizeForMatching(text: string): string {
+  let normalized = text.toLowerCase().trim();
+  
+  // Remove leading "chapter X" or "recipe X" prefixes (case-insensitive)
+  normalized = normalized.replace(/^(chapter|recipe)\s+\d+(\.\d+)*[\s:.-]*/i, "");
+  
+  // Remove leading numbering prefixes (e.g., "1.", "1.2", "1)", "1 -", "1. -")
+  normalized = normalized.replace(/^\d+(\.\d+)*[\s.\)-]*/, "");
+  
+  // Remove leading/trailing punctuation residues
+  normalized = normalized.replace(/^[\s:.-]+/, "").replace(/[\s:.-]+$/, "");
+  
+  // Normalize whitespace and punctuation sequences to single space
+  normalized = normalized.replace(/[\s\-_:.,()]+/g, " ").trim();
+  
+  return normalized;
+}
+
 // Helper to check if a paragraph at a given index is followed by recipe content
 export function isRecipeHeading(allPs: Element[], index: number): boolean {
   let checkIndex = index + 1;
@@ -240,72 +259,42 @@ export async function processDocxHeadings(
 
   if (cleanOutlineLines) {
     // --- OPTION 1: OUTLINE MODE ---
-    // Cache text and H1 details of all document paragraphs
-    const paragraphsInfo = allPs.map((p, idx) => ({
-      index: idx,
-      pElement: p,
-      text: getParagraphText(p).trim(),
-      isH1: isHeading1(p)
-    })).filter(info => info.text.length > 0);
+    const normalizedOutlineLines = cleanOutlineLines.map(line => normalizeForMatching(line));
+    const matchedOutlineIndices = new Set<number>();
 
-    const convertedIndices = new Set<number>();
+    for (let i = 0; i < allPs.length; i++) {
+      const p = allPs[i];
+      const text = getParagraphText(p).trim();
+      if (text.length === 0) continue;
 
-    for (const line of cleanOutlineLines) {
-      let isLineMatched = false;
-
-      // 1. Try exact case-sensitive match
-      const caseSensitiveMatches = paragraphsInfo.filter(info => info.text === line);
-
-      if (caseSensitiveMatches.length > 0) {
-        isLineMatched = true;
-        for (const match of caseSensitiveMatches) {
-          if (match.isH1) {
-            skippedH1Count++;
-          } else {
-            if (!convertedIndices.has(match.index)) {
-              applyH2AndUnbold(doc, match.pElement);
-              convertedCount++;
-              if (isRecipeBook) {
-                if (isRecipeHeading(allPs, match.index)) {
-                  recipeConvertedCount++;
-                } else {
-                  subtopicConvertedCount++;
-                }
-              }
-              convertedIndices.add(match.index);
+      const normPText = normalizeForMatching(text);
+      
+      // Check if it matches any outline line
+      const matchIdx = normalizedOutlineLines.findIndex(normLine => normLine === normPText);
+      
+      if (matchIdx !== -1) {
+        // Flagged for conversion!
+        if (isHeading1(p)) {
+          skippedH1Count++;
+        } else {
+          applyH2AndUnbold(doc, p);
+          convertedCount++;
+          if (isRecipeBook) {
+            if (isRecipeHeading(allPs, i)) {
+              recipeConvertedCount++;
+            } else {
+              subtopicConvertedCount++;
             }
           }
-        }
-      } else {
-        // 2. Try safe fallback case-insensitive match only if exactly one matches
-        const caseInsensitiveMatches = paragraphsInfo.filter(
-          info => info.text.toLowerCase() === line.toLowerCase()
-        );
-
-        if (caseInsensitiveMatches.length === 1) {
-          isLineMatched = true;
-          const match = caseInsensitiveMatches[0];
-          if (match.isH1) {
-            skippedH1Count++;
-          } else {
-            if (!convertedIndices.has(match.index)) {
-              applyH2AndUnbold(doc, match.pElement);
-              convertedCount++;
-              if (isRecipeBook) {
-                if (isRecipeHeading(allPs, match.index)) {
-                  recipeConvertedCount++;
-                } else {
-                  subtopicConvertedCount++;
-                }
-              }
-              convertedIndices.add(match.index);
-            }
-          }
+          matchedOutlineIndices.add(matchIdx);
         }
       }
+    }
 
-      if (!isLineMatched) {
-        unmatchedLines.push(line);
+    // Determine unmatched outline lines
+    for (let idx = 0; idx < cleanOutlineLines.length; idx++) {
+      if (!matchedOutlineIndices.has(idx)) {
+        unmatchedLines.push(cleanOutlineLines[idx]);
       }
     }
   } else {
