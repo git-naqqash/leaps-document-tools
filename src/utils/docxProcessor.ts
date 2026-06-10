@@ -165,14 +165,23 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
 }
 
-// Helper to strip trailing colons and invisible zero-width spaces, then trim text
-export function cleanTextForComparison(str: string): string {
-  // Remove invisible zero-width spaces (u200B, u200C, u200D, uFEFF)
-  let cleaned = str.replace(/[\u200B-\u200D\uFEFF]/g, "");
-  cleaned = cleaned.trim();
+// Helper to strip zero-width spaces, trailing colons, bullets, numbering prefixes, and multiple whitespaces
+export function sanitizeForComparison(str: string): string {
+  // Remove invisible zero-width spaces
+  let sanitized = str.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  // Convert to lowercase
+  sanitized = sanitized.toLowerCase();
   // Remove trailing colon(s)
-  cleaned = cleaned.replace(/:+$/, "");
-  return cleaned.trim();
+  sanitized = sanitized.replace(/:+$/, "");
+  // Remove standard bullet characters (•, ●, ○, ▪, ▫, -, *, +, >, #) from anywhere
+  sanitized = sanitized.replace(/[•●○▪▫\-*+>#]/g, "");
+  // Remove leading "chapter X" or "recipe X" prefixes
+  sanitized = sanitized.replace(/^(chapter|recipe)\s+\d+(\.\d+)*[\s:.-]*/, "");
+  // Remove leading numbering prefixes (e.g. 1., 1.2, 1), 1 -)
+  sanitized = sanitized.replace(/^\d+(\.\d+)*[\s.\)-]*/, "");
+  // Collapse multiple whitespaces to single spaces
+  sanitized = sanitized.replace(/\s+/g, " ");
+  return sanitized.trim();
 }
 
 // Helper to check if a paragraph at a given index is followed by recipe content
@@ -250,7 +259,7 @@ export async function processDocxHeadings(
 
   if (cleanOutlineLines) {
     // --- OPTION 1: OUTLINE MODE ---
-    const normalizedOutlineLines = cleanOutlineLines.map(line => cleanTextForComparison(line).toLowerCase());
+    const sanitizedOutlineLines = cleanOutlineLines.map(line => sanitizeForComparison(line));
     const matchedOutlineIndices = new Set<number>();
 
     // Safety blocklist of common recipe body markers (compared case-insensitively)
@@ -266,18 +275,16 @@ export async function processDocxHeadings(
     for (let i = 0; i < allPs.length; i++) {
       const p = allPs[i];
       const text = getParagraphText(p);
-      const cleanedPText = cleanTextForComparison(text);
-      if (cleanedPText.length === 0) continue;
-
-      const lowerPText = cleanedPText.toLowerCase();
+      const sanitizedPText = sanitizeForComparison(text);
+      if (sanitizedPText.length === 0) continue;
 
       // Enforce the explicit blocklist
-      if (blocklist.includes(lowerPText)) {
+      if (blocklist.includes(sanitizedPText)) {
         continue;
       }
       
-      // Perform strict exact matching (case-insensitive on cleaned text)
-      const matchIdx = normalizedOutlineLines.findIndex(normLine => normLine === lowerPText);
+      // Perform strict exact matching (case-insensitive on sanitized text)
+      const matchIdx = sanitizedOutlineLines.findIndex(sanLine => sanLine === sanitizedPText);
       
       if (matchIdx !== -1) {
         // Flagged for conversion!
@@ -325,6 +332,19 @@ export async function processDocxHeadings(
 
       // Automatic mode must skip bullets, indents, and existing H2s
       if (!isBullet && !isInd && !isAlreadyH2) {
+        const sanitizedPText = sanitizeForComparison(text);
+        const blocklist = [
+          "introduction",
+          "ingredients",
+          "instructions",
+          "directions",
+          "prep time",
+          "cook time"
+        ];
+        if (blocklist.includes(sanitizedPText)) {
+          continue;
+        }
+
         let shouldConvert = false;
         let isRecipe = false;
 
