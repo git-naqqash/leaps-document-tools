@@ -165,23 +165,14 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
 }
 
-// Helper to normalize string for outline matching to handle numbering anomalies and whitespace
-export function normalizeForMatching(text: string): string {
-  let normalized = text.toLowerCase().trim();
-  
-  // Remove leading "chapter X" or "recipe X" prefixes (case-insensitive)
-  normalized = normalized.replace(/^(chapter|recipe)\s+\d+(\.\d+)*[\s:.-]*/i, "");
-  
-  // Remove leading numbering prefixes (e.g., "1.", "1.2", "1)", "1 -", "1. -")
-  normalized = normalized.replace(/^\d+(\.\d+)*[\s.\)-]*/, "");
-  
-  // Remove leading/trailing punctuation residues
-  normalized = normalized.replace(/^[\s:.-]+/, "").replace(/[\s:.-]+$/, "");
-  
-  // Normalize whitespace and punctuation sequences to single space
-  normalized = normalized.replace(/[\s\-_:.,()]+/g, " ").trim();
-  
-  return normalized;
+// Helper to strip trailing colons and invisible zero-width spaces, then trim text
+export function cleanTextForComparison(str: string): string {
+  // Remove invisible zero-width spaces (u200B, u200C, u200D, uFEFF)
+  let cleaned = str.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  cleaned = cleaned.trim();
+  // Remove trailing colon(s)
+  cleaned = cleaned.replace(/:+$/, "");
+  return cleaned.trim();
 }
 
 // Helper to check if a paragraph at a given index is followed by recipe content
@@ -259,18 +250,34 @@ export async function processDocxHeadings(
 
   if (cleanOutlineLines) {
     // --- OPTION 1: OUTLINE MODE ---
-    const normalizedOutlineLines = cleanOutlineLines.map(line => normalizeForMatching(line));
+    const normalizedOutlineLines = cleanOutlineLines.map(line => cleanTextForComparison(line).toLowerCase());
     const matchedOutlineIndices = new Set<number>();
+
+    // Safety blocklist of common recipe body markers (compared case-insensitively)
+    const blocklist = [
+      "introduction",
+      "ingredients",
+      "instructions",
+      "directions",
+      "prep time",
+      "cook time"
+    ];
 
     for (let i = 0; i < allPs.length; i++) {
       const p = allPs[i];
-      const text = getParagraphText(p).trim();
-      if (text.length === 0) continue;
+      const text = getParagraphText(p);
+      const cleanedPText = cleanTextForComparison(text);
+      if (cleanedPText.length === 0) continue;
 
-      const normPText = normalizeForMatching(text);
+      const lowerPText = cleanedPText.toLowerCase();
+
+      // Enforce the explicit blocklist
+      if (blocklist.includes(lowerPText)) {
+        continue;
+      }
       
-      // Check if it matches any outline line
-      const matchIdx = normalizedOutlineLines.findIndex(normLine => normLine === normPText);
+      // Perform strict exact matching (case-insensitive on cleaned text)
+      const matchIdx = normalizedOutlineLines.findIndex(normLine => normLine === lowerPText);
       
       if (matchIdx !== -1) {
         // Flagged for conversion!
