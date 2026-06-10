@@ -174,7 +174,7 @@ export default function Home() {
       const cleanManualLines = nrOutlineText
         .split(/\r?\n/)
         .map(line => line.trim())
-        .filter(line => line.length > 0);
+        .filter(line => line.length >= 3);
 
       if (cleanManualLines.length > 0) {
         outlineLines = cleanManualLines;
@@ -281,7 +281,7 @@ export default function Home() {
       const cleanManualLines = rOutlineText
         .split(/\r?\n/)
         .map(line => line.trim())
-        .filter(line => line.length > 0);
+        .filter(line => line.length >= 3);
 
       if (cleanManualLines.length > 0) {
         outlineLines = cleanManualLines;

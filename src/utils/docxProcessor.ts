@@ -254,61 +254,84 @@ export async function processDocxHeadings(
   const warnings: string[] = [];
 
   const cleanOutlineLines = outlineLines
-    ? outlineLines.map(line => line.trim()).filter(line => line.length > 0)
+    ? outlineLines.map(line => line.trim()).filter(line => line.length >= 3)
     : null;
 
   if (cleanOutlineLines) {
     // --- OPTION 1: OUTLINE MODE ---
-    const sanitizedOutlineLines = cleanOutlineLines.map(line => sanitizeForComparison(line));
-    const matchedOutlineIndices = new Set<number>();
+    const sanitizedOutlineLines = cleanOutlineLines
+      .map(line => sanitizeForComparison(line))
+      .filter(line => line.length >= 3);
 
-    // Safety blocklist of common recipe body markers (compared case-insensitively)
-    const blocklist = [
-      "introduction",
-      "ingredients",
-      "instructions",
-      "directions",
-      "prep time",
-      "cook time"
-    ];
+    if (sanitizedOutlineLines.length > 0) {
+      const matchedOutlineIndices = new Set<number>();
 
-    for (let i = 0; i < allPs.length; i++) {
-      const p = allPs[i];
-      const text = getParagraphText(p);
-      const sanitizedPText = sanitizeForComparison(text);
-      if (sanitizedPText.length === 0) continue;
+      // Safety blocklist of common recipe body markers (compared case-insensitively)
+      const blocklist = [
+        "introduction",
+        "ingredients",
+        "instructions",
+        "directions",
+        "prep time",
+        "cook time"
+      ];
 
-      // Enforce the explicit blocklist
-      if (blocklist.includes(sanitizedPText)) {
-        continue;
-      }
-      
-      // Perform strict exact matching (case-insensitive on sanitized text)
-      const matchIdx = sanitizedOutlineLines.findIndex(sanLine => sanLine === sanitizedPText);
-      
-      if (matchIdx !== -1) {
-        // Flagged for conversion!
-        if (isHeading1(p)) {
-          skippedH1Count++;
-        } else {
-          applyH2AndUnbold(doc, p);
-          convertedCount++;
-          if (isRecipeBook) {
-            if (isRecipeHeading(allPs, i)) {
-              recipeConvertedCount++;
-            } else {
-              subtopicConvertedCount++;
+      for (let i = 0; i < allPs.length; i++) {
+        const p = allPs[i];
+        const text = getParagraphText(p);
+        
+        // Length & Punctuation Guard
+        const trimmedText = text.trim();
+        const wordCount = trimmedText.split(/\s+/).filter(Boolean).length;
+        if (trimmedText.length > 120 || wordCount > 15 || trimmedText.endsWith(".")) {
+          continue;
+        }
+
+        const sanitizedPText = sanitizeForComparison(text);
+        if (sanitizedPText.length === 0) continue;
+
+        // Enforce the explicit blocklist
+        if (blocklist.includes(sanitizedPText)) {
+          continue;
+        }
+        
+        // Perform strict exact matching (case-insensitive on sanitized text)
+        const matchIdx = sanitizedOutlineLines.findIndex(sanLine => sanLine === sanitizedPText);
+        
+        if (matchIdx !== -1) {
+          // Flagged for conversion!
+          if (isHeading1(p)) {
+            skippedH1Count++;
+          } else {
+            applyH2AndUnbold(doc, p);
+            convertedCount++;
+            if (isRecipeBook) {
+              if (isRecipeHeading(allPs, i)) {
+                recipeConvertedCount++;
+              } else {
+                subtopicConvertedCount++;
+              }
             }
+            matchedOutlineIndices.add(matchIdx);
           }
-          matchedOutlineIndices.add(matchIdx);
         }
       }
-    }
 
-    // Determine unmatched outline lines
-    for (let idx = 0; idx < cleanOutlineLines.length; idx++) {
-      if (!matchedOutlineIndices.has(idx)) {
-        unmatchedLines.push(cleanOutlineLines[idx]);
+      // Determine unmatched outline lines
+      for (let idx = 0; idx < cleanOutlineLines.length; idx++) {
+        const outlineLine = cleanOutlineLines[idx];
+        const sanitizedLine = sanitizeForComparison(outlineLine);
+        if (sanitizedLine.length < 3) {
+          unmatchedLines.push(outlineLine);
+          continue;
+        }
+
+        const wasMatched = Array.from(matchedOutlineIndices).some(
+          matchedIdx => sanitizedOutlineLines[matchedIdx] === sanitizedLine
+        );
+        if (!wasMatched) {
+          unmatchedLines.push(outlineLine);
+        }
       }
     }
   } else {
@@ -323,6 +346,12 @@ export async function processDocxHeadings(
           // If we encounter a Heading 1 under automatic mode, count it for the skipped logs
           skippedH1Count++;
         }
+        continue;
+      }
+
+      // Length & Punctuation Guard
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      if (text.length > 120 || wordCount > 15 || text.endsWith(".")) {
         continue;
       }
 
