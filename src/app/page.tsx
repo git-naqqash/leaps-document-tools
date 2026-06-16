@@ -83,9 +83,7 @@ export default function Home() {
   const [nrUnmatchedOutlineTargets, setNrUnmatchedOutlineTargets] = useState<string[]>([]);
   const [nrSkippedAmbiguousMatches, setNrSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [nrTotalOutlineTargets, setNrTotalOutlineTargets] = useState(0);
-  const [nrStrictOutlineMode, setNrStrictOutlineMode] = useState(true);
-  const [nrExactMatchConvertedCount, setNrExactMatchConvertedCount] = useState(0);
-  const [nrAutoSubtopicConvertedCount, setNrAutoSubtopicConvertedCount] = useState(0);
+  const [nrOutlineSource, setNrOutlineSource] = useState("");
 
   const nrMainInputRef = useRef<HTMLInputElement>(null);
   const nrOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -99,8 +97,6 @@ export default function Home() {
   const [rStatus, setRStatus] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [rMessage, setRMessage] = useState("");
   const [rConvertedCount, setRConvertedCount] = useState(0);
-  const [rRecipeConvertedCount, setRRecipeConvertedCount] = useState(0);
-  const [rSubtopicConvertedCount, setRSubtopicConvertedCount] = useState(0);
   const [rWarnings, setRWarnings] = useState<string[]>([]);
   const [rUnmatchedLines, setRUnmatchedLines] = useState<string[]>([]);
   const [rSkippedH1Count, setRSkippedH1Count] = useState(0);
@@ -112,10 +108,7 @@ export default function Home() {
   const [rUnmatchedOutlineTargets, setRUnmatchedOutlineTargets] = useState<string[]>([]);
   const [rSkippedAmbiguousMatches, setRSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [rTotalOutlineTargets, setRTotalOutlineTargets] = useState(0);
-  const [rStrictOutlineMode, setRStrictOutlineMode] = useState(true);
-  const [rExactMatchConvertedCount, setRExactMatchConvertedCount] = useState(0);
-  const [rAutoRecipeConvertedCount, setRAutoRecipeConvertedCount] = useState(0);
-  const [rAutoSubtopicConvertedCount, setRAutoSubtopicConvertedCount] = useState(0);
+  const [rOutlineSource, setROutlineSource] = useState("");
 
   const rMainInputRef = useRef<HTMLInputElement>(null);
   const rOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -174,7 +167,20 @@ export default function Home() {
   const runNonRecipeH2 = async () => {
     if (!nrMainFile) {
       setNrStatus("error");
-      setNrMessage("Please upload a main Word file (.docx) first.");
+      setNrMessage("Please upload the main DOCX file.");
+      return;
+    }
+
+    const manualOutlineText = nrOutlineText.trim();
+    if (!nrOutlineFile && !manualOutlineText) {
+      setNrStatus("error");
+      setNrMessage("Please upload or paste the outline first. Outline is required for accurate H2 formatting.");
+      return;
+    }
+
+    if (nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size) {
+      setNrStatus("error");
+      setNrMessage("Please upload a separate outline file. The main document cannot be used as the outline.");
       return;
     }
 
@@ -192,8 +198,7 @@ export default function Home() {
     setNrUnmatchedOutlineTargets([]);
     setNrSkippedAmbiguousMatches([]);
     setNrTotalOutlineTargets(0);
-    setNrExactMatchConvertedCount(0);
-    setNrAutoSubtopicConvertedCount(0);
+    setNrOutlineSource("");
 
     try {
       let outlineLines: string[] | null = null;
@@ -203,21 +208,23 @@ export default function Home() {
       const cleanManualLines = nrOutlineText
         .split(/\r?\n/)
         .map(line => line.trim())
-        .filter(line => line.length >= 3);
+        .filter(line => line.length > 0);
 
       if (cleanManualLines.length > 0) {
         outlineLines = cleanManualLines;
         usedOutline = true;
         setNrOutlineLinesCount(cleanManualLines.length);
         setNrUsedOutline(true);
+        setNrOutlineSource("Pasted Outline Text");
       } else if (nrOutlineFile) {
-        // 2. Optional outline file upload second
+        // 2. Outline file upload second
         setNrMessage("Parsing outline file...");
         const fileLines = await parseOutlineFile(nrOutlineFile);
         outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
         usedOutline = true;
         setNrOutlineLinesCount(outlineLines.length);
         setNrUsedOutline(true);
+        setNrOutlineSource(nrOutlineFile.name);
         if (outlineLines.length === 0) {
           setNrWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
@@ -233,14 +240,10 @@ export default function Home() {
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches,
-        exactMatchConvertedCount,
-        autoSubtopicConvertedCount
+        skippedAmbiguousMatches
       } = await processDocxHeadings(
         nrMainFile,
-        outlineLines,
-        false, // isRecipeBook = false
-        nrStrictOutlineMode
+        outlineLines
       );
 
       setNrOutputSize(blob.size);
@@ -254,8 +257,6 @@ export default function Home() {
       setNrConvertedParagraphs(convertedParagraphs);
       setNrUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setNrSkippedAmbiguousMatches(skippedAmbiguousMatches);
-      setNrExactMatchConvertedCount(exactMatchConvertedCount);
-      setNrAutoSubtopicConvertedCount(autoSubtopicConvertedCount);
 
       if (convertedCount === 0) {
         setNrStatus("success");
@@ -308,7 +309,20 @@ export default function Home() {
   const runRecipeH2 = async () => {
     if (!rMainFile) {
       setRStatus("error");
-      setRMessage("Please upload a main Word file (.docx) first.");
+      setRMessage("Please upload the main DOCX file.");
+      return;
+    }
+
+    const manualOutlineText = rOutlineText.trim();
+    if (!rOutlineFile && !manualOutlineText) {
+      setRStatus("error");
+      setRMessage("Please upload or paste the outline first. Outline is required for accurate H2 formatting.");
+      return;
+    }
+
+    if (rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size) {
+      setRStatus("error");
+      setRMessage("Please upload a separate outline file. The main document cannot be used as the outline.");
       return;
     }
 
@@ -316,21 +330,17 @@ export default function Home() {
     setRMessage("Reading document and analyzing recipe contents...");
     setRWarnings([]);
     setROriginalSize(rMainFile.size);
-    setRRecipeConvertedCount(0);
-    setRSubtopicConvertedCount(0);
     setRUnmatchedLines([]);
     setRSkippedH1Count(0);
     setROutlineLinesCount(0);
     setRUsedOutline(false);
 
-    // Clear previous report stats
+    // Clear previous report states
     setRConvertedParagraphs([]);
     setRUnmatchedOutlineTargets([]);
     setRSkippedAmbiguousMatches([]);
     setRTotalOutlineTargets(0);
-    setRExactMatchConvertedCount(0);
-    setRAutoRecipeConvertedCount(0);
-    setRAutoSubtopicConvertedCount(0);
+    setROutlineSource("");
 
     try {
       let outlineLines: string[] | null = null;
@@ -340,21 +350,23 @@ export default function Home() {
       const cleanManualLines = rOutlineText
         .split(/\r?\n/)
         .map(line => line.trim())
-        .filter(line => line.length >= 3);
+        .filter(line => line.length > 0);
 
       if (cleanManualLines.length > 0) {
         outlineLines = cleanManualLines;
         usedOutline = true;
         setROutlineLinesCount(cleanManualLines.length);
         setRUsedOutline(true);
+        setROutlineSource("Pasted Outline Text");
       } else if (rOutlineFile) {
-        // 2. Optional outline file upload second
+        // 2. Outline file upload second
         setRMessage("Parsing recipe outline file...");
         const fileLines = await parseOutlineFile(rOutlineFile);
         outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
         usedOutline = true;
         setROutlineLinesCount(outlineLines.length);
         setRUsedOutline(true);
+        setROutlineSource(rOutlineFile.name);
         if (outlineLines.length === 0) {
           setRWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
@@ -364,29 +376,20 @@ export default function Home() {
       const {
         blob,
         convertedCount,
-        recipeConvertedCount,
-        subtopicConvertedCount,
         unmatchedLines,
         skippedH1Count,
         warnings,
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches,
-        exactMatchConvertedCount,
-        autoRecipeConvertedCount,
-        autoSubtopicConvertedCount
+        skippedAmbiguousMatches
       } = await processDocxHeadings(
         rMainFile,
-        outlineLines,
-        true, // isRecipeBook = true
-        rStrictOutlineMode
+        outlineLines
       );
 
       setROutputSize(blob.size);
       setRConvertedCount(convertedCount);
-      setRRecipeConvertedCount(recipeConvertedCount);
-      setRSubtopicConvertedCount(subtopicConvertedCount);
       setRUnmatchedLines(unmatchedLines);
       setRSkippedH1Count(skippedH1Count);
       setRWarnings((prev) => [...prev, ...warnings]);
@@ -396,9 +399,6 @@ export default function Home() {
       setRConvertedParagraphs(convertedParagraphs);
       setRUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setRSkippedAmbiguousMatches(skippedAmbiguousMatches);
-      setRExactMatchConvertedCount(exactMatchConvertedCount);
-      setRAutoRecipeConvertedCount(autoRecipeConvertedCount);
-      setRAutoSubtopicConvertedCount(autoSubtopicConvertedCount);
 
       if (convertedCount === 0) {
         setRStatus("success");
@@ -581,7 +581,7 @@ export default function Home() {
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Optional Outline File (.docx, .txt)
+                      Required Outline File (.docx, .txt)
                     </label>
                     {nrOutlineFile ? (
                       <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -616,30 +616,9 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Mode Settings */}
-                <div className="mt-4 p-3.5 bg-slate-50/50 rounded-xl border border-slate-200/60 transition-all duration-200 hover:border-slate-300">
-                  <label className="flex items-start space-x-3 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={nrStrictOutlineMode}
-                      onChange={(e) => setNrStrictOutlineMode(e.target.checked)}
-                      className="mt-1 h-4.5 w-4.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30 transition cursor-pointer"
-                    />
-                    <div className="flex-1">
-                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-                        Strict Outline Mode
-                      </span>
-                      <span className="text-[11px] text-slate-500 block mt-0.5 leading-relaxed">
-                        When enabled, only exact-matched outline lines are converted. Automatic heading detection, guessing, and fallback logic are completely disabled.
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
                 {/* Info disclaimer */}
-                <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-500 space-y-1">
-                  <div>• Bold styling will be explicitly disabled on matches.</div>
-                  <div>• Text wording and order remain exactly unchanged.</div>
+                <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-500">
+                  Only exact lines from the uploaded or pasted outline will be converted. No automatic heading detection is used.
                 </div>
 
                 {/* Status Screen */}
@@ -666,14 +645,15 @@ export default function Home() {
 
                     {nrStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
-                        <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
-                          <div>Total outline targets: <span className="font-bold text-slate-900">{nrUsedOutline ? nrTotalOutlineTargets : "N/A"}</span></div>
-                          <div>Converted by exact match: <span className="font-bold text-slate-900">{nrExactMatchConvertedCount}</span></div>
-                          <div>Converted by auto detection: <span className="font-bold text-slate-900">{nrAutoSubtopicConvertedCount}</span></div>
-                          <div>Total H2 headings converted: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
-                          <div>Skipped H1 matches: <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
-                          <div>Original file size: <span className="font-bold text-slate-900">{formatSize(nrOriginalSize)}</span></div>
-                          <div>Output file size: <span className="font-bold text-slate-900">{formatSize(nrOutputSize)}</span></div>
+                        <div className="grid grid-cols-2 gap-3 bg-slate-100/60 p-3 rounded-lg border border-slate-200/50 font-medium text-slate-700">
+                          <div className="col-span-2"><span className="text-slate-500">Main DOCX:</span> <span className="font-bold text-slate-900">{nrMainFile?.name}</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Outline Source:</span> <span className="font-bold text-slate-900">{nrOutlineSource}</span></div>
+                          <div><span className="text-slate-500">Total Outline Targets:</span> <span className="font-bold text-slate-900">{nrTotalOutlineTargets}</span></div>
+                          <div><span className="text-slate-500">Converted by Exact Match:</span> <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
+                          <div><span className="text-slate-500">Auto Detections Used:</span> <span className="font-bold text-slate-900">0</span></div>
+                          <div><span className="text-slate-500">Skipped H1 matches:</span> <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
+                          <div><span className="text-slate-500">Original file size:</span> <span className="font-bold text-slate-900">{formatSize(nrOriginalSize)}</span></div>
+                          <div><span className="text-slate-500">Output file size:</span> <span className="font-bold text-slate-900">{formatSize(nrOutputSize)}</span></div>
                         </div>
 
                         {nrOutputSize > 2 * nrOriginalSize && (
@@ -687,7 +667,7 @@ export default function Home() {
                           <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Processing Report</h4>
                           
                           <div className="grid grid-cols-2 gap-2 text-[11px]">
-                            <div>Total outline targets found: <span className="font-bold text-slate-800">{nrUsedOutline ? nrTotalOutlineTargets : "N/A"}</span></div>
+                            <div>Total outline targets found: <span className="font-bold text-slate-800">{nrTotalOutlineTargets}</span></div>
                             <div>Total paragraphs converted: <span className="font-bold text-slate-800">{nrConvertedCount}</span></div>
                           </div>
 
@@ -704,7 +684,7 @@ export default function Home() {
                           )}
 
                           {/* List of outline targets not found */}
-                          {nrUsedOutline && nrUnmatchedOutlineTargets.length > 0 && (
+                          {nrUnmatchedOutlineTargets.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
                               <span className="font-semibold text-amber-800 block mb-1">Outline Targets Not Found ({nrUnmatchedOutlineTargets.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
@@ -760,7 +740,12 @@ export default function Home() {
               <div className="mt-8">
                 <button
                   onClick={runNonRecipeH2}
-                  disabled={nrStatus === "processing" || !nrMainFile}
+                  disabled={
+                    nrStatus === "processing" ||
+                    !nrMainFile ||
+                    (!nrOutlineFile && !nrOutlineText.trim()) ||
+                    !!(nrMainFile && nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size)
+                  }
                   className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
                   Format Non-Recipe Book H2
@@ -836,7 +821,7 @@ export default function Home() {
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Optional Outline File (.docx, .txt)
+                      Required Outline File (.docx, .txt)
                     </label>
                     {rOutlineFile ? (
                       <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -871,30 +856,9 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Mode Settings */}
-                <div className="mt-4 p-3.5 bg-slate-50/50 rounded-xl border border-slate-200/60 transition-all duration-200 hover:border-slate-300">
-                  <label className="flex items-start space-x-3 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={rStrictOutlineMode}
-                      onChange={(e) => setRStrictOutlineMode(e.target.checked)}
-                      className="mt-1 h-4.5 w-4.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30 transition cursor-pointer"
-                    />
-                    <div className="flex-1">
-                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-                        Strict Outline Mode
-                      </span>
-                      <span className="text-[11px] text-slate-500 block mt-0.5 leading-relaxed">
-                        When enabled, only exact-matched outline lines are converted. Automatic heading detection, guessing, and fallback logic are completely disabled.
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                {/* Heuristic summary details */}
-                <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-500 space-y-1">
-                  <div>• Matches headings followed by ingredients, timings, or cooking instructions.</div>
-                  <div>• Bold properties inside recipe headings will be disabled.</div>
+                {/* Info disclaimer */}
+                <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-500">
+                  Only exact lines from the uploaded or pasted outline will be converted. No automatic heading detection is used.
                 </div>
 
                 {/* Status Screen */}
@@ -921,15 +885,15 @@ export default function Home() {
 
                     {rStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
-                        <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
-                          <div>Total outline targets: <span className="font-bold text-slate-900">{rUsedOutline ? rTotalOutlineTargets : "N/A"}</span></div>
-                          <div>Converted by exact match: <span className="font-bold text-slate-900">{rExactMatchConvertedCount}</span></div>
-                          <div>Recipe headings by auto: <span className="font-bold text-slate-900">{rAutoRecipeConvertedCount}</span></div>
-                          <div>Other headings by auto: <span className="font-bold text-slate-900">{rAutoSubtopicConvertedCount}</span></div>
-                          <div>Total H2 headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
-                          <div>Skipped H1 matches: <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
-                          <div>Original file size: <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
-                          <div>Output file size: <span className="font-bold text-slate-900">{formatSize(rOutputSize)}</span></div>
+                        <div className="grid grid-cols-2 gap-3 bg-slate-100/60 p-3 rounded-lg border border-slate-200/50 font-medium text-slate-700">
+                          <div className="col-span-2"><span className="text-slate-500">Main DOCX:</span> <span className="font-bold text-slate-900">{rMainFile?.name}</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Outline Source:</span> <span className="font-bold text-slate-900">{rOutlineSource}</span></div>
+                          <div><span className="text-slate-500">Total Outline Targets:</span> <span className="font-bold text-slate-900">{rTotalOutlineTargets}</span></div>
+                          <div><span className="text-slate-500">Converted by Exact Match:</span> <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
+                          <div><span className="text-slate-500">Auto Detections Used:</span> <span className="font-bold text-slate-900">0</span></div>
+                          <div><span className="text-slate-500">Skipped H1 matches:</span> <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
+                          <div><span className="text-slate-500">Original file size:</span> <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
+                          <div><span className="text-slate-500">Output file size:</span> <span className="font-bold text-slate-900">{formatSize(rOutputSize)}</span></div>
                         </div>
 
                         {rOutputSize > 2 * rOriginalSize && (
@@ -943,7 +907,7 @@ export default function Home() {
                           <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Processing Report</h4>
                           
                           <div className="grid grid-cols-2 gap-2 text-[11px]">
-                            <div>Total outline targets found: <span className="font-bold text-slate-800">{rUsedOutline ? rTotalOutlineTargets : "N/A"}</span></div>
+                            <div>Total outline targets found: <span className="font-bold text-slate-800">{rTotalOutlineTargets}</span></div>
                             <div>Total paragraphs converted: <span className="font-bold text-slate-800">{rConvertedCount}</span></div>
                           </div>
 
@@ -960,7 +924,7 @@ export default function Home() {
                           )}
 
                           {/* List of outline targets not found */}
-                          {rUsedOutline && rUnmatchedOutlineTargets.length > 0 && (
+                          {rUnmatchedOutlineTargets.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
                               <span className="font-semibold text-amber-800 block mb-1">Outline Targets Not Found ({rUnmatchedOutlineTargets.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
@@ -986,7 +950,7 @@ export default function Home() {
                           )}
                         </div>
 
-                        <div className="text-emerald-700 font-semibold flex items-center pt-1 border-t border-slate-200/40 font-semibold">
+                        <div className="text-emerald-700 font-semibold flex items-center pt-1 border-t border-slate-200/40">
                           ✓ No text was rewritten. Recipe names and chapter subtopics were formatted as Heading 2 with bold OFF.
                         </div>
 
@@ -1016,7 +980,12 @@ export default function Home() {
               <div className="mt-8">
                 <button
                   onClick={runRecipeH2}
-                  disabled={rStatus === "processing" || !rMainFile}
+                  disabled={
+                    rStatus === "processing" ||
+                    !rMainFile ||
+                    (!rOutlineFile && !rOutlineText.trim()) ||
+                    !!(rMainFile && rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size)
+                  }
                   className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
                   Format Recipe Book H2

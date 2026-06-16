@@ -245,54 +245,13 @@ export function isTOCParagraph(p: Element): boolean {
   return isTOCParagraphText(text);
 }
 
-// Helper to check if a paragraph at a given index is followed by recipe content
-export function isRecipeHeading(allPs: Element[], index: number): boolean {
-  let checkIndex = index + 1;
-  let nonMetadataCount = 0;
-
-  // Check next 5 paragraphs
-  while (checkIndex < allPs.length && nonMetadataCount < 5) {
-    const nextP = allPs[checkIndex];
-    const nextText = getParagraphText(nextP).trim();
-    if (nextText.length > 0) {
-      // If the next paragraph is a Heading 1 or Heading 2, the section has ended
-      if (isHeading1(nextP) || isHeading2(nextP)) {
-        break;
-      }
-      nonMetadataCount++;
-      
-      // Key terms indicating a recipe follows
-      const hasKeywords = /^(ingredients|directions|instructions|method|preparation|servings|prep\s*time|cook\s*time|nutrition|calories)/i.test(nextText);
-      
-      // Ingredient measurements list (e.g. 1 cup, 1/2 tsp, 2 large, etc.)
-      const hasIngredientsList = /^\d+[\s\d\/¼½¾.,-]*\s*(cup|tbsp|tsp|gram|g|oz|ml|pound|lb|pinch|can|clove|slice|teaspoon|tablespoon|piece|pkg|large|medium|small|head|cloves|slices|cans|grams|ounces|ml|cups|tablespoons|teaspoons)/i.test(nextText);
-      
-      // Numbered cooking instructions (e.g. 1. Mix, Step 2: Heat)
-      const hasNumberedSteps = /^(step\s*\d+|\d+\s*[\.\)-])/i.test(nextText);
-
-      if (hasKeywords || hasIngredientsList || hasNumberedSteps) {
-        return true;
-      }
-    }
-    checkIndex++;
-  }
-  return false;
-}
-
 // Main logic to parse a docx archive, identify headings, and rewrite word/document.xml
 export async function processDocxHeadings(
   docxFile: File,
-  outlineLines: string[] | null,
-  isRecipeBook: boolean,
-  isStrict: boolean
+  outlineLines: string[] | null
 ): Promise<{
   blob: Blob;
   convertedCount: number;
-  recipeConvertedCount: number;
-  subtopicConvertedCount: number;
-  exactMatchConvertedCount: number;
-  autoRecipeConvertedCount: number;
-  autoSubtopicConvertedCount: number;
   unmatchedLines: string[];
   skippedH1Count: number;
   warnings: string[];
@@ -316,9 +275,6 @@ export async function processDocxHeadings(
   const allPs = getDescendantsByLocalName(doc.documentElement, "p");
 
   let convertedCount = 0;
-  let exactMatchConvertedCount = 0;
-  let autoRecipeConvertedCount = 0;
-  let autoSubtopicConvertedCount = 0;
   let skippedH1Count = 0;
   const warnings: string[] = [];
   const unmatchedLines: string[] = [];
@@ -340,190 +296,110 @@ export async function processDocxHeadings(
         })
     : [];
 
-  const hasOutline = cleanOutlineLines.length > 0;
-  const totalOutlineTargets = hasOutline ? cleanOutlineLines.length : 0;
+  const totalOutlineTargets = cleanOutlineLines.length;
 
-  if (isStrict && !hasOutline) {
-    // If strict mode is ON and no outline exists, do absolutely nothing.
-    warnings.push("Strict Outline Mode is ON, but no outline was uploaded or pasted. No changes were made.");
-  } else if (hasOutline) {
-    // --- OUTLINE MODE (Outline is the ONLY source of truth) ---
-    
-    // Map normalized string to original line for reporting
-    const normalizedToOriginalOutline = new Map<string, string>();
-    const sanitizedOutlineLines: string[] = [];
-    
-    for (const line of cleanOutlineLines) {
-      const norm = normalizeForMatching(line);
-      if (norm.length >= 3) {
-        if (!normalizedToOriginalOutline.has(norm)) {
-          normalizedToOriginalOutline.set(norm, line);
-          sanitizedOutlineLines.push(norm);
-        }
+  if (totalOutlineTargets === 0) {
+    throw new Error("No valid outline targets found. Please upload the correct outline file.");
+  }
+
+  // --- OUTLINE MODE (Outline is the ONLY source of truth) ---
+  
+  // Map normalized string to original line for reporting
+  const normalizedToOriginalOutline = new Map<string, string>();
+  const sanitizedOutlineLines: string[] = [];
+  
+  for (const line of cleanOutlineLines) {
+    const norm = normalizeForMatching(line);
+    if (norm.length >= 3) {
+      if (!normalizedToOriginalOutline.has(norm)) {
+        normalizedToOriginalOutline.set(norm, line);
+        sanitizedOutlineLines.push(norm);
       }
     }
+  }
 
-    const matchedOutlineNormalized = new Set<string>();
+  const matchedOutlineNormalized = new Set<string>();
 
-    for (let i = 0; i < allPs.length; i++) {
-      const p = allPs[i];
-      const text = getParagraphText(p);
-      const trimmedText = text.trim();
+  for (let i = 0; i < allPs.length; i++) {
+    const p = allPs[i];
+    const text = getParagraphText(p);
+    const trimmedText = text.trim();
 
-      if (trimmedText.length === 0) continue;
+    if (trimmedText.length === 0) continue;
 
-      const normalizedPText = normalizeForMatching(text);
-      if (normalizedPText.length === 0) continue;
+    const normalizedPText = normalizeForMatching(text);
+    if (normalizedPText.length === 0) continue;
 
-      // Check if it matches an item in the outline
-      if (normalizedToOriginalOutline.has(normalizedPText)) {
-        // Strict blocklist check: do not convert common labels unless they are explicitly in the outline
-        const strictBlocklist = [
-          "intro", "intro:",
-          "introduction", "introduction:",
-          "ingredients", "ingredients:",
-          "instructions", "instructions:",
-          "directions", "directions:",
-          "prep time", "prep time:",
-          "cook time", "cook time:",
-          "storage & shelf life", "storage & shelf life:",
-          "nutrition", "nutrition:",
-          "canner's tip", "canner's tip:",
-          "makes", "makes:",
-          "preparation & processing time", "preparation & processing time:"
-        ];
-        const lowerTrimmed = trimmedText.toLowerCase();
-        if (strictBlocklist.includes(lowerTrimmed)) {
-          const hasExactInOutline = cleanOutlineLines.some(
-            line => line.toLowerCase() === lowerTrimmed
-          );
-          if (!hasExactInOutline) {
-            skippedAmbiguousMatches.push({ text: trimmedText, reason: "Blocklisted label (not explicitly in outline)" });
-            continue;
-          }
-        }
-
-        // Evaluate guards
-        const isH1 = isHeading1(p);
-        const isTOC = isTOCParagraph(p);
-
-        const wordCount = trimmedText.split(/\s+/).filter(Boolean).length;
-        const isLong = trimmedText.length > 120;
-        const hasTooManyWords = wordCount > 15;
-        const endsWithPeriod = trimmedText.endsWith(".");
-        const failedLengthGuard = isLong || hasTooManyWords || endsWithPeriod;
-
-        if (isH1) {
-          skippedH1Count++;
-          skippedAmbiguousMatches.push({ text: trimmedText, reason: "Already Heading 1" });
-        } else if (isTOC) {
-          skippedAmbiguousMatches.push({ text: trimmedText, reason: "Table of Contents line" });
-        } else if (failedLengthGuard) {
-          let reason = "Length & Punctuation Guard (";
-          if (isLong) reason += `length: ${trimmedText.length} chars > 120`;
-          else if (hasTooManyWords) reason += `word count: ${wordCount} > 15`;
-          else if (endsWithPeriod) reason += "ends with period";
-          reason += ")";
-          skippedAmbiguousMatches.push({ text: trimmedText, reason });
-        } else {
-          // Convert paragraph to Heading 2
-          applyH2AndUnbold(doc, p);
-          convertedCount++;
-          exactMatchConvertedCount++;
-          convertedParagraphs.push(trimmedText);
-          matchedOutlineNormalized.add(normalizedPText);
-        }
-      }
-    }
-
-    // Determine unmatched outline lines
-    for (const norm of sanitizedOutlineLines) {
-      if (!matchedOutlineNormalized.has(norm)) {
-        const orig = normalizedToOriginalOutline.get(norm) || norm;
-        unmatchedOutlineTargets.push(orig);
-        unmatchedLines.push(orig);
-      }
-    }
-
-  } else {
-    // --- AUTOMATIC DETECTION MODE (isStrict is false, and no outline exists) ---
-    const defaultBlocklist = [
-      "intro", "intro:",
-      "introduction", "introduction:",
-      "ingredients", "ingredients:",
-      "instructions", "instructions:",
-      "directions", "directions:",
-      "prep time", "prep time:",
-      "cook time", "cook time:",
-      "storage & shelf life", "storage & shelf life:",
-      "nutrition", "nutrition:",
-      "canner's tip", "canner's tip:",
-      "makes", "makes:",
-      "preparation & processing time", "preparation & processing time:"
-    ];
-
-    for (let i = 0; i < allPs.length; i++) {
-      const p = allPs[i];
-      const text = getParagraphText(p).trim();
-
-      // Skip empty lines, H1 paragraphs, TOC, lists/indents, and existing H2s
-      if (text.length === 0 || isHeading1(p)) {
-        if (text.length > 0 && isHeading1(p)) {
-          skippedH1Count++;
-        }
-        continue;
-      }
-
-      if (isTOCParagraph(p)) {
-        continue;
-      }
-
-      // Length & Punctuation Guard
-      const wordCount = text.split(/\s+/).filter(Boolean).length;
-      if (text.length > 120 || wordCount > 15 || text.endsWith(".")) {
-        continue;
-      }
-
-      const isBullet = isBulletOrListItem(p);
-      const isInd = isIndented(p);
-      const isAlreadyH2 = isHeading2(p);
-
-      if (!isBullet && !isInd && !isAlreadyH2) {
-        const normalizedPText = normalizeForMatching(text);
-        if (defaultBlocklist.includes(normalizedPText)) {
+    // Check if it matches an item in the outline
+    if (normalizedToOriginalOutline.has(normalizedPText)) {
+      // Strict blocklist check: do not convert common labels unless they are explicitly in the outline
+      const strictBlocklist = [
+        "intro", "intro:",
+        "introduction", "introduction:",
+        "ingredients", "ingredients:",
+        "instructions", "instructions:",
+        "directions", "directions:",
+        "prep time", "prep time:",
+        "cook time", "cook time:",
+        "storage & shelf life", "storage & shelf life:",
+        "nutrition", "nutrition:",
+        "canner's tip", "canner's tip:",
+        "makes", "makes:",
+        "preparation & processing time", "preparation & processing time:",
+        "meal composition", "meal composition:",
+        "recommended recipes", "recommended recipes:",
+        "what to watch", "what to watch:",
+        "focus areas", "focus areas:"
+      ];
+      const lowerTrimmed = trimmedText.toLowerCase();
+      if (strictBlocklist.includes(lowerTrimmed)) {
+        const hasExactInOutline = cleanOutlineLines.some(
+          line => line.toLowerCase() === lowerTrimmed
+        );
+        if (!hasExactInOutline) {
+          skippedAmbiguousMatches.push({ text: trimmedText, reason: "Blocklisted label (not explicitly in outline)" });
           continue;
         }
-
-        let shouldConvert = false;
-        let isRecipe = false;
-
-        if (isRecipeBook) {
-          if (isRecipeHeading(allPs, i)) {
-            shouldConvert = true;
-            isRecipe = true;
-          } else if (checkNonRecipeHeuristic(allPs, i)) {
-            shouldConvert = true;
-            isRecipe = false;
-          }
-        } else {
-          shouldConvert = checkNonRecipeHeuristic(allPs, i);
-        }
-
-        if (shouldConvert) {
-          applyH2AndUnbold(doc, p);
-          convertedCount++;
-          convertedParagraphs.push(text);
-          if (isRecipeBook) {
-            if (isRecipe) {
-              autoRecipeConvertedCount++;
-            } else {
-              autoSubtopicConvertedCount++;
-            }
-          } else {
-            autoSubtopicConvertedCount++;
-          }
-        }
       }
+
+      // Evaluate guards
+      const isH1 = isHeading1(p);
+      const isTOC = isTOCParagraph(p);
+
+      const wordCount = trimmedText.split(/\s+/).filter(Boolean).length;
+      const isLong = trimmedText.length > 120;
+      const hasTooManyWords = wordCount > 15;
+      const endsWithPeriod = trimmedText.endsWith(".");
+      const failedLengthGuard = isLong || hasTooManyWords || endsWithPeriod;
+
+      if (isH1) {
+        skippedH1Count++;
+        skippedAmbiguousMatches.push({ text: trimmedText, reason: "Already Heading 1" });
+      } else if (isTOC) {
+        skippedAmbiguousMatches.push({ text: trimmedText, reason: "Table of Contents line" });
+      } else if (failedLengthGuard) {
+        let reason = "Length & Punctuation Guard (";
+        if (isLong) reason += `length: ${trimmedText.length} chars > 120`;
+        else if (hasTooManyWords) reason += `word count: ${wordCount} > 15`;
+        else if (endsWithPeriod) reason += "ends with period";
+        reason += ")";
+        skippedAmbiguousMatches.push({ text: trimmedText, reason });
+      } else {
+        // Convert paragraph to Heading 2
+        applyH2AndUnbold(doc, p);
+        convertedCount++;
+        convertedParagraphs.push(trimmedText);
+        matchedOutlineNormalized.add(normalizedPText);
+      }
+    }
+  }
+
+  // Determine unmatched outline lines
+  for (const norm of sanitizedOutlineLines) {
+    if (!matchedOutlineNormalized.has(norm)) {
+      const orig = normalizedToOriginalOutline.get(norm) || norm;
+      unmatchedOutlineTargets.push(orig);
+      unmatchedLines.push(orig);
     }
   }
 
@@ -549,11 +425,6 @@ export async function processDocxHeadings(
   return {
     blob,
     convertedCount,
-    recipeConvertedCount: autoRecipeConvertedCount,
-    subtopicConvertedCount: autoSubtopicConvertedCount,
-    exactMatchConvertedCount,
-    autoRecipeConvertedCount,
-    autoSubtopicConvertedCount,
     unmatchedLines,
     skippedH1Count,
     warnings,
@@ -562,49 +433,4 @@ export async function processDocxHeadings(
     unmatchedOutlineTargets,
     skippedAmbiguousMatches
   };
-}
-
-// Conservative check for Non-Recipe headings
-function checkNonRecipeHeuristic(allPs: Element[], index: number): boolean {
-  const p = allPs[index];
-  const text = getParagraphText(p).trim();
-
-  // Basic title length bounds
-  if (text.length < 3 || text.length > 80) return false;
-  
-  // Word count check (1 to 12 words)
-  const wordCount = text.split(/\s+/).length;
-  if (wordCount > 12) return false;
-
-  // Titles should not end with terminal punctuation
-  if (/[.?!:]$/.test(text)) return false;
-
-  // Must not start with a lowercase letter (should be capitalized)
-  if (/^[a-z]/.test(text)) return false;
-
-  // Look ahead for body text belonging to this topic
-  let nextText = "";
-  let nextP: Element | null = null;
-  for (let j = index + 1; j < allPs.length; j++) {
-    const t = getParagraphText(allPs[j]).trim();
-    if (t.length > 0) {
-      nextText = t;
-      nextP = allPs[j];
-      break;
-    }
-  }
-
-  if (nextText.length > 0 && nextP) {
-    // Check if next paragraph represents standard body text
-    const nextWordCount = nextText.split(/\s+/).length;
-    const nextEndsWithPunct = /[.?!]$/.test(nextText);
-    const nextIsHeading = isHeading1(nextP) || isHeading2(nextP);
-
-    // If next paragraph is not a heading and has body characteristics (long or ends in punctuation)
-    if (!nextIsHeading && (nextWordCount > 15 || nextEndsWithPunct)) {
-      return true;
-    }
-  }
-
-  return false;
 }
