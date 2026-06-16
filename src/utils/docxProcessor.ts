@@ -290,6 +290,9 @@ export async function processDocxHeadings(
   convertedCount: number;
   recipeConvertedCount: number;
   subtopicConvertedCount: number;
+  exactMatchConvertedCount: number;
+  autoRecipeConvertedCount: number;
+  autoSubtopicConvertedCount: number;
   unmatchedLines: string[];
   skippedH1Count: number;
   warnings: string[];
@@ -313,8 +316,9 @@ export async function processDocxHeadings(
   const allPs = getDescendantsByLocalName(doc.documentElement, "p");
 
   let convertedCount = 0;
-  let recipeConvertedCount = 0;
-  let subtopicConvertedCount = 0;
+  let exactMatchConvertedCount = 0;
+  let autoRecipeConvertedCount = 0;
+  let autoSubtopicConvertedCount = 0;
   let skippedH1Count = 0;
   const warnings: string[] = [];
   const unmatchedLines: string[] = [];
@@ -373,6 +377,32 @@ export async function processDocxHeadings(
 
       // Check if it matches an item in the outline
       if (normalizedToOriginalOutline.has(normalizedPText)) {
+        // Strict blocklist check: do not convert common labels unless they are explicitly in the outline
+        const strictBlocklist = [
+          "intro", "intro:",
+          "introduction", "introduction:",
+          "ingredients", "ingredients:",
+          "instructions", "instructions:",
+          "directions", "directions:",
+          "prep time", "prep time:",
+          "cook time", "cook time:",
+          "storage & shelf life", "storage & shelf life:",
+          "nutrition", "nutrition:",
+          "canner's tip", "canner's tip:",
+          "makes", "makes:",
+          "preparation & processing time", "preparation & processing time:"
+        ];
+        const lowerTrimmed = trimmedText.toLowerCase();
+        if (strictBlocklist.includes(lowerTrimmed)) {
+          const hasExactInOutline = cleanOutlineLines.some(
+            line => line.toLowerCase() === lowerTrimmed
+          );
+          if (!hasExactInOutline) {
+            skippedAmbiguousMatches.push({ text: trimmedText, reason: "Blocklisted label (not explicitly in outline)" });
+            continue;
+          }
+        }
+
         // Evaluate guards
         const isH1 = isHeading1(p);
         const isTOC = isTOCParagraph(p);
@@ -399,16 +429,9 @@ export async function processDocxHeadings(
           // Convert paragraph to Heading 2
           applyH2AndUnbold(doc, p);
           convertedCount++;
+          exactMatchConvertedCount++;
           convertedParagraphs.push(trimmedText);
           matchedOutlineNormalized.add(normalizedPText);
-
-          if (isRecipeBook) {
-            if (isRecipeHeading(allPs, i)) {
-              recipeConvertedCount++;
-            } else {
-              subtopicConvertedCount++;
-            }
-          }
         }
       }
     }
@@ -492,10 +515,12 @@ export async function processDocxHeadings(
           convertedParagraphs.push(text);
           if (isRecipeBook) {
             if (isRecipe) {
-              recipeConvertedCount++;
+              autoRecipeConvertedCount++;
             } else {
-              subtopicConvertedCount++;
+              autoSubtopicConvertedCount++;
             }
+          } else {
+            autoSubtopicConvertedCount++;
           }
         }
       }
@@ -524,8 +549,11 @@ export async function processDocxHeadings(
   return {
     blob,
     convertedCount,
-    recipeConvertedCount,
-    subtopicConvertedCount,
+    recipeConvertedCount: autoRecipeConvertedCount,
+    subtopicConvertedCount: autoSubtopicConvertedCount,
+    exactMatchConvertedCount,
+    autoRecipeConvertedCount,
+    autoSubtopicConvertedCount,
     unmatchedLines,
     skippedH1Count,
     warnings,

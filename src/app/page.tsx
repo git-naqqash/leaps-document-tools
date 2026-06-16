@@ -84,6 +84,8 @@ export default function Home() {
   const [nrSkippedAmbiguousMatches, setNrSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [nrTotalOutlineTargets, setNrTotalOutlineTargets] = useState(0);
   const [nrStrictOutlineMode, setNrStrictOutlineMode] = useState(true);
+  const [nrExactMatchConvertedCount, setNrExactMatchConvertedCount] = useState(0);
+  const [nrAutoSubtopicConvertedCount, setNrAutoSubtopicConvertedCount] = useState(0);
 
   const nrMainInputRef = useRef<HTMLInputElement>(null);
   const nrOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -111,6 +113,9 @@ export default function Home() {
   const [rSkippedAmbiguousMatches, setRSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [rTotalOutlineTargets, setRTotalOutlineTargets] = useState(0);
   const [rStrictOutlineMode, setRStrictOutlineMode] = useState(true);
+  const [rExactMatchConvertedCount, setRExactMatchConvertedCount] = useState(0);
+  const [rAutoRecipeConvertedCount, setRAutoRecipeConvertedCount] = useState(0);
+  const [rAutoSubtopicConvertedCount, setRAutoSubtopicConvertedCount] = useState(0);
 
   const rMainInputRef = useRef<HTMLInputElement>(null);
   const rOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -187,6 +192,8 @@ export default function Home() {
     setNrUnmatchedOutlineTargets([]);
     setNrSkippedAmbiguousMatches([]);
     setNrTotalOutlineTargets(0);
+    setNrExactMatchConvertedCount(0);
+    setNrAutoSubtopicConvertedCount(0);
 
     try {
       let outlineLines: string[] | null = null;
@@ -226,7 +233,9 @@ export default function Home() {
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches
+        skippedAmbiguousMatches,
+        exactMatchConvertedCount,
+        autoSubtopicConvertedCount
       } = await processDocxHeadings(
         nrMainFile,
         outlineLines,
@@ -245,6 +254,8 @@ export default function Home() {
       setNrConvertedParagraphs(convertedParagraphs);
       setNrUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setNrSkippedAmbiguousMatches(skippedAmbiguousMatches);
+      setNrExactMatchConvertedCount(exactMatchConvertedCount);
+      setNrAutoSubtopicConvertedCount(autoSubtopicConvertedCount);
 
       if (convertedCount === 0) {
         setNrStatus("success");
@@ -317,6 +328,9 @@ export default function Home() {
     setRUnmatchedOutlineTargets([]);
     setRSkippedAmbiguousMatches([]);
     setRTotalOutlineTargets(0);
+    setRExactMatchConvertedCount(0);
+    setRAutoRecipeConvertedCount(0);
+    setRAutoSubtopicConvertedCount(0);
 
     try {
       let outlineLines: string[] | null = null;
@@ -358,7 +372,10 @@ export default function Home() {
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches
+        skippedAmbiguousMatches,
+        exactMatchConvertedCount,
+        autoRecipeConvertedCount,
+        autoSubtopicConvertedCount
       } = await processDocxHeadings(
         rMainFile,
         outlineLines,
@@ -379,6 +396,9 @@ export default function Home() {
       setRConvertedParagraphs(convertedParagraphs);
       setRUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setRSkippedAmbiguousMatches(skippedAmbiguousMatches);
+      setRExactMatchConvertedCount(exactMatchConvertedCount);
+      setRAutoRecipeConvertedCount(autoRecipeConvertedCount);
+      setRAutoSubtopicConvertedCount(autoSubtopicConvertedCount);
 
       if (convertedCount === 0) {
         setRStatus("success");
@@ -647,8 +667,10 @@ export default function Home() {
                     {nrStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
                         <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
-                          <div>Total outline lines: <span className="font-bold text-slate-900">{nrUsedOutline ? nrOutlineLinesCount : "N/A (Auto)"}</span></div>
-                          <div>Headings converted: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
+                          <div>Total outline targets: <span className="font-bold text-slate-900">{nrUsedOutline ? nrTotalOutlineTargets : "N/A"}</span></div>
+                          <div>Converted by exact match: <span className="font-bold text-slate-900">{nrExactMatchConvertedCount}</span></div>
+                          <div>Converted by auto detection: <span className="font-bold text-slate-900">{nrAutoSubtopicConvertedCount}</span></div>
+                          <div>Total H2 headings converted: <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
                           <div>Skipped H1 matches: <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
                           <div>Original file size: <span className="font-bold text-slate-900">{formatSize(nrOriginalSize)}</span></div>
                           <div>Output file size: <span className="font-bold text-slate-900">{formatSize(nrOutputSize)}</span></div>
@@ -900,9 +922,10 @@ export default function Home() {
                     {rStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
                         <div className="grid grid-cols-2 gap-2 bg-slate-100/60 p-2.5 rounded-lg border border-slate-200/50 font-medium">
-                          <div>Total outline lines: <span className="font-bold text-slate-900">{rUsedOutline ? rOutlineLinesCount : "N/A (Auto)"}</span></div>
-                          <div>Recipe names converted: <span className="font-bold text-slate-900">{rRecipeConvertedCount}</span></div>
-                          <div>Other chapter subtopics converted: <span className="font-bold text-slate-900">{rSubtopicConvertedCount}</span></div>
+                          <div>Total outline targets: <span className="font-bold text-slate-900">{rUsedOutline ? rTotalOutlineTargets : "N/A"}</span></div>
+                          <div>Converted by exact match: <span className="font-bold text-slate-900">{rExactMatchConvertedCount}</span></div>
+                          <div>Recipe headings by auto: <span className="font-bold text-slate-900">{rAutoRecipeConvertedCount}</span></div>
+                          <div>Other headings by auto: <span className="font-bold text-slate-900">{rAutoSubtopicConvertedCount}</span></div>
                           <div>Total H2 headings converted: <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
                           <div>Skipped H1 matches: <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
                           <div>Original file size: <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
