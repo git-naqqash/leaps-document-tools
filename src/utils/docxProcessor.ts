@@ -165,23 +165,67 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
   }
 }
 
-// Helper to strip zero-width spaces, trailing colons, bullets, numbering prefixes, and multiple whitespaces
-export function sanitizeForComparison(str: string): string {
-  // Remove invisible zero-width spaces
-  let sanitized = str.replace(/[\u200B-\u200D\uFEFF]/g, "");
-  // Convert to lowercase
-  sanitized = sanitized.toLowerCase();
-  // Remove trailing colon(s)
-  sanitized = sanitized.replace(/:+$/, "");
-  // Remove standard bullet characters (•, ●, ○, ▪, ▫, -, *, +, >, #) from anywhere
-  sanitized = sanitized.replace(/[•●○▪▫\-*+>#]/g, "");
-  // Remove leading "chapter X" or "recipe X" prefixes
-  sanitized = sanitized.replace(/^(chapter|recipe)\s+\d+(\.\d+)*[\s:.-]*/, "");
-  // Remove leading numbering prefixes (e.g. 1., 1.2, 1), 1 -)
-  sanitized = sanitized.replace(/^\d+(\.\d+)*[\s.\)-]*/, "");
-  // Collapse multiple whitespaces to single spaces
-  sanitized = sanitized.replace(/\s+/g, " ");
-  return sanitized.trim();
+// Helper to perform conservative normalization for exact heading matching
+export function normalizeForMatching(str: string): string {
+  if (!str) return "";
+  
+  // 1. Remove zero-width characters
+  let normalized = str.replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+  // 2. Treat tab spacing as equivalent to space
+  normalized = normalized.replace(/\t/g, " ");
+
+  // 3. Treat hyphen, en dash (–), and em dash (—) as equivalent
+  normalized = normalized.replace(/[\u2013\u2014-]/g, "-");
+
+  // 4. Treat smart quotes and straight quotes as equivalent
+  // Double quotes
+  normalized = normalized.replace(/[\u201C\u201D\u201E]/g, '"');
+  // Single quotes / apostrophes
+  normalized = normalized.replace(/[\u2018\u2019\u201A]/g, "'");
+
+  // 5. Collapse multiple spaces into one
+  normalized = normalized.replace(/\s+/g, " ");
+
+  // 6. Recipe serial number equivalence:
+  // e.g., "1 - Green Beans", "1 – Green Beans", "1. Green Beans", "1) Green Beans"
+  // Normalize prefix to "1 Green Beans" format
+  normalized = normalized.replace(/^(\d+)\s*[\.\-\)]\s*/, "$1 ");
+
+  // Case-insensitivity (lowercase) and trim
+  return normalized.trim().toLowerCase();
+}
+
+// Checks if a line contains markers typical of a TOC page line (dots, page numbers with tabs)
+export function isTOCParagraphText(text: string): boolean {
+  const trimmed = text.trim();
+  // Contains dot leaders (3 or more dots) or underscores (3 or more underscores)
+  if (/\.{3,}/.test(trimmed) || /_{3,}/.test(trimmed)) {
+    return true;
+  }
+  // Ends with a page number preceded by a tab, multiple spaces, or dots
+  if (/[\s\t\.\-_]\d+$/.test(trimmed)) {
+    if (/(\t|\s{2,}|\.{2,})\d+$/.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Checks if a paragraph element represents a TOC entry based on style or text
+export function isTOCParagraph(p: Element): boolean {
+  const pPr = findChildByLocalName(p, "pPr");
+  if (pPr) {
+    const pStyle = findChildByLocalName(pPr, "pStyle");
+    if (pStyle) {
+      const val = (pStyle.getAttribute("w:val") || pStyle.getAttribute("val") || "").toLowerCase();
+      if (val.startsWith("toc") || val.includes("toc")) {
+        return true;
+      }
+    }
+  }
+  const text = getParagraphText(p);
+  return isTOCParagraphText(text);
 }
 
 // Helper to check if a paragraph at a given index is followed by recipe content
@@ -222,7 +266,8 @@ export function isRecipeHeading(allPs: Element[], index: number): boolean {
 export async function processDocxHeadings(
   docxFile: File,
   outlineLines: string[] | null,
-  isRecipeBook: boolean
+  isRecipeBook: boolean,
+  isStrict: boolean
 ): Promise<{
   blob: Blob;
   convertedCount: number;
@@ -231,6 +276,10 @@ export async function processDocxHeadings(
   unmatchedLines: string[];
   skippedH1Count: number;
   warnings: string[];
+  totalOutlineTargets: number;
+  convertedParagraphs: string[];
+  unmatchedOutlineTargets: string[];
+  skippedAmbiguousMatches: { text: string; reason: string }[];
 }> {
   const arrayBuffer = await docxFile.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuffer);
@@ -250,102 +299,142 @@ export async function processDocxHeadings(
   let recipeConvertedCount = 0;
   let subtopicConvertedCount = 0;
   let skippedH1Count = 0;
-  const unmatchedLines: string[] = [];
   const warnings: string[] = [];
+  const unmatchedLines: string[] = [];
 
+  // Report collections
+  const convertedParagraphs: string[] = [];
+  const skippedAmbiguousMatches: { text: string; reason: string }[] = [];
+  const unmatchedOutlineTargets: string[] = [];
+
+  // Parse and clean outline lines
   const cleanOutlineLines = outlineLines
-    ? outlineLines.map(line => line.trim()).filter(line => line.length >= 3)
-    : null;
+    ? outlineLines
+        .map(line => line.trim())
+        .filter(line => {
+          if (line.length < 3) return false;
+          // Skip TOC lines with page numbers
+          if (isTOCParagraphText(line)) return false;
+          return true;
+        })
+    : [];
 
-  if (cleanOutlineLines) {
-    // --- OPTION 1: OUTLINE MODE ---
-    const sanitizedOutlineLines = cleanOutlineLines
-      .map(line => sanitizeForComparison(line))
-      .filter(line => line.length >= 3);
+  const hasOutline = cleanOutlineLines.length > 0;
+  const totalOutlineTargets = hasOutline ? cleanOutlineLines.length : 0;
 
-    if (sanitizedOutlineLines.length > 0) {
-      const matchedOutlineIndices = new Set<number>();
-
-      // Safety blocklist of common recipe body markers (compared case-insensitively)
-      const blocklist = [
-        "introduction",
-        "ingredients",
-        "instructions",
-        "directions",
-        "prep time",
-        "cook time"
-      ];
-
-      for (let i = 0; i < allPs.length; i++) {
-        const p = allPs[i];
-        const text = getParagraphText(p);
-        
-        // Length & Punctuation Guard
-        const trimmedText = text.trim();
-        const wordCount = trimmedText.split(/\s+/).filter(Boolean).length;
-        if (trimmedText.length > 120 || wordCount > 15 || trimmedText.endsWith(".")) {
-          continue;
-        }
-
-        const sanitizedPText = sanitizeForComparison(text);
-        if (sanitizedPText.length === 0) continue;
-
-        // Enforce the explicit blocklist
-        if (blocklist.includes(sanitizedPText)) {
-          continue;
-        }
-        
-        // Perform strict exact matching (case-insensitive on sanitized text)
-        const matchIdx = sanitizedOutlineLines.findIndex(sanLine => sanLine === sanitizedPText);
-        
-        if (matchIdx !== -1) {
-          // Flagged for conversion!
-          if (isHeading1(p)) {
-            skippedH1Count++;
-          } else {
-            applyH2AndUnbold(doc, p);
-            convertedCount++;
-            if (isRecipeBook) {
-              if (isRecipeHeading(allPs, i)) {
-                recipeConvertedCount++;
-              } else {
-                subtopicConvertedCount++;
-              }
-            }
-            matchedOutlineIndices.add(matchIdx);
-          }
-        }
-      }
-
-      // Determine unmatched outline lines
-      for (let idx = 0; idx < cleanOutlineLines.length; idx++) {
-        const outlineLine = cleanOutlineLines[idx];
-        const sanitizedLine = sanitizeForComparison(outlineLine);
-        if (sanitizedLine.length < 3) {
-          unmatchedLines.push(outlineLine);
-          continue;
-        }
-
-        const wasMatched = Array.from(matchedOutlineIndices).some(
-          matchedIdx => sanitizedOutlineLines[matchedIdx] === sanitizedLine
-        );
-        if (!wasMatched) {
-          unmatchedLines.push(outlineLine);
+  if (isStrict && !hasOutline) {
+    // If strict mode is ON and no outline exists, do absolutely nothing.
+    warnings.push("Strict Outline Mode is ON, but no outline was uploaded or pasted. No changes were made.");
+  } else if (hasOutline) {
+    // --- OUTLINE MODE (Outline is the ONLY source of truth) ---
+    
+    // Map normalized string to original line for reporting
+    const normalizedToOriginalOutline = new Map<string, string>();
+    const sanitizedOutlineLines: string[] = [];
+    
+    for (const line of cleanOutlineLines) {
+      const norm = normalizeForMatching(line);
+      if (norm.length >= 3) {
+        if (!normalizedToOriginalOutline.has(norm)) {
+          normalizedToOriginalOutline.set(norm, line);
+          sanitizedOutlineLines.push(norm);
         }
       }
     }
+
+    const matchedOutlineNormalized = new Set<string>();
+
+    for (let i = 0; i < allPs.length; i++) {
+      const p = allPs[i];
+      const text = getParagraphText(p);
+      const trimmedText = text.trim();
+
+      if (trimmedText.length === 0) continue;
+
+      const normalizedPText = normalizeForMatching(text);
+      if (normalizedPText.length === 0) continue;
+
+      // Check if it matches an item in the outline
+      if (normalizedToOriginalOutline.has(normalizedPText)) {
+        // Evaluate guards
+        const isH1 = isHeading1(p);
+        const isTOC = isTOCParagraph(p);
+
+        const wordCount = trimmedText.split(/\s+/).filter(Boolean).length;
+        const isLong = trimmedText.length > 120;
+        const hasTooManyWords = wordCount > 15;
+        const endsWithPeriod = trimmedText.endsWith(".");
+        const failedLengthGuard = isLong || hasTooManyWords || endsWithPeriod;
+
+        if (isH1) {
+          skippedH1Count++;
+          skippedAmbiguousMatches.push({ text: trimmedText, reason: "Already Heading 1" });
+        } else if (isTOC) {
+          skippedAmbiguousMatches.push({ text: trimmedText, reason: "Table of Contents line" });
+        } else if (failedLengthGuard) {
+          let reason = "Length & Punctuation Guard (";
+          if (isLong) reason += `length: ${trimmedText.length} chars > 120`;
+          else if (hasTooManyWords) reason += `word count: ${wordCount} > 15`;
+          else if (endsWithPeriod) reason += "ends with period";
+          reason += ")";
+          skippedAmbiguousMatches.push({ text: trimmedText, reason });
+        } else {
+          // Convert paragraph to Heading 2
+          applyH2AndUnbold(doc, p);
+          convertedCount++;
+          convertedParagraphs.push(trimmedText);
+          matchedOutlineNormalized.add(normalizedPText);
+
+          if (isRecipeBook) {
+            if (isRecipeHeading(allPs, i)) {
+              recipeConvertedCount++;
+            } else {
+              subtopicConvertedCount++;
+            }
+          }
+        }
+      }
+    }
+
+    // Determine unmatched outline lines
+    for (const norm of sanitizedOutlineLines) {
+      if (!matchedOutlineNormalized.has(norm)) {
+        const orig = normalizedToOriginalOutline.get(norm) || norm;
+        unmatchedOutlineTargets.push(orig);
+        unmatchedLines.push(orig);
+      }
+    }
+
   } else {
-    // --- OPTION 2: AUTOMATIC DETECTION MODE ---
+    // --- AUTOMATIC DETECTION MODE (isStrict is false, and no outline exists) ---
+    const defaultBlocklist = [
+      "intro", "intro:",
+      "introduction", "introduction:",
+      "ingredients", "ingredients:",
+      "instructions", "instructions:",
+      "directions", "directions:",
+      "prep time", "prep time:",
+      "cook time", "cook time:",
+      "storage & shelf life", "storage & shelf life:",
+      "nutrition", "nutrition:",
+      "canner's tip", "canner's tip:",
+      "makes", "makes:",
+      "preparation & processing time", "preparation & processing time:"
+    ];
+
     for (let i = 0; i < allPs.length; i++) {
       const p = allPs[i];
       const text = getParagraphText(p).trim();
 
-      // Skip empty lines and H1 paragraphs
+      // Skip empty lines, H1 paragraphs, TOC, lists/indents, and existing H2s
       if (text.length === 0 || isHeading1(p)) {
         if (text.length > 0 && isHeading1(p)) {
-          // If we encounter a Heading 1 under automatic mode, count it for the skipped logs
           skippedH1Count++;
         }
+        continue;
+      }
+
+      if (isTOCParagraph(p)) {
         continue;
       }
 
@@ -359,18 +448,9 @@ export async function processDocxHeadings(
       const isInd = isIndented(p);
       const isAlreadyH2 = isHeading2(p);
 
-      // Automatic mode must skip bullets, indents, and existing H2s
       if (!isBullet && !isInd && !isAlreadyH2) {
-        const sanitizedPText = sanitizeForComparison(text);
-        const blocklist = [
-          "introduction",
-          "ingredients",
-          "instructions",
-          "directions",
-          "prep time",
-          "cook time"
-        ];
-        if (blocklist.includes(sanitizedPText)) {
+        const normalizedPText = normalizeForMatching(text);
+        if (defaultBlocklist.includes(normalizedPText)) {
           continue;
         }
 
@@ -378,7 +458,6 @@ export async function processDocxHeadings(
         let isRecipe = false;
 
         if (isRecipeBook) {
-          // Recipe Book Heuristics
           if (isRecipeHeading(allPs, i)) {
             shouldConvert = true;
             isRecipe = true;
@@ -387,13 +466,13 @@ export async function processDocxHeadings(
             isRecipe = false;
           }
         } else {
-          // Non-Recipe Book Heuristics
           shouldConvert = checkNonRecipeHeuristic(allPs, i);
         }
 
         if (shouldConvert) {
           applyH2AndUnbold(doc, p);
           convertedCount++;
+          convertedParagraphs.push(text);
           if (isRecipeBook) {
             if (isRecipe) {
               recipeConvertedCount++;
@@ -406,8 +485,8 @@ export async function processDocxHeadings(
     }
   }
 
-  if (convertedCount === 0) {
-    warnings.push("No clear H2 candidates found. No changes made.");
+  if (convertedCount === 0 && warnings.length === 0) {
+    warnings.push("No H2 headings were converted. No changes made.");
   }
 
   // Serialize DOM back to XML string without modifying spacing/trimming in the source w:t nodes
@@ -424,7 +503,20 @@ export async function processDocxHeadings(
     compression: "DEFLATE",
     compressionOptions: { level: 6 }
   });
-  return { blob, convertedCount, recipeConvertedCount, subtopicConvertedCount, unmatchedLines, skippedH1Count, warnings };
+
+  return {
+    blob,
+    convertedCount,
+    recipeConvertedCount,
+    subtopicConvertedCount,
+    unmatchedLines,
+    skippedH1Count,
+    warnings,
+    totalOutlineTargets,
+    convertedParagraphs,
+    unmatchedOutlineTargets,
+    skippedAmbiguousMatches
+  };
 }
 
 // Conservative check for Non-Recipe headings
