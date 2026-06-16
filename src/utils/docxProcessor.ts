@@ -166,6 +166,7 @@ export function applyH2AndUnbold(doc: Document, p: Element) {
 }
 
 // Helper to perform conservative normalization for exact heading matching
+// Helper to perform conservative normalization for exact heading matching
 export function normalizeForMatching(str: string): string {
   if (!str) return "";
   
@@ -175,25 +176,41 @@ export function normalizeForMatching(str: string): string {
   // 2. Treat tab spacing as equivalent to space
   normalized = normalized.replace(/\t/g, " ");
 
-  // 3. Treat hyphen, en dash (–), and em dash (—) as equivalent
+  // 3. Remove leading bullet characters and any spaces after them
+  normalized = normalized.replace(/^\s*[•●○▪▫*+>#\-–—]\s*/, "");
+
+  // 4. Remove trailing colons
+  normalized = normalized.replace(/:+$/, "");
+
+  // 5. Treat hyphen, en dash (–), and em dash (—) as equivalent
   normalized = normalized.replace(/[\u2013\u2014-]/g, "-");
 
-  // 4. Treat smart quotes and straight quotes as equivalent
+  // 6. Treat smart quotes and straight quotes as equivalent
   // Double quotes
   normalized = normalized.replace(/[\u201C\u201D\u201E]/g, '"');
   // Single quotes / apostrophes
   normalized = normalized.replace(/[\u2018\u2019\u201A]/g, "'");
 
-  // 5. Collapse multiple spaces into one
+  // 7. Collapse multiple spaces into one
   normalized = normalized.replace(/\s+/g, " ");
 
-  // 6. Recipe serial number equivalence:
+  // 8. Recipe serial number equivalence:
   // e.g., "1 - Green Beans", "1 – Green Beans", "1. Green Beans", "1) Green Beans"
   // Normalize prefix to "1 Green Beans" format
   normalized = normalized.replace(/^(\d+)\s*[\.\-\)]\s*/, "$1 ");
 
   // Case-insensitivity (lowercase) and trim
   return normalized.trim().toLowerCase();
+}
+
+// Clean trailing page numbers and dot leaders from outline/TOC lines
+export function cleanOutlineLine(line: string): string {
+  let cleaned = line.trim();
+  // Strip trailing dot leaders, dashes, underscores, spaces, or tabs followed by a page number
+  cleaned = cleaned.replace(/[\s\t\.\-_]{2,}\d+$/, "");
+  // Strip trailing tab character followed by a page number
+  cleaned = cleaned.replace(/\t\d+$/, "");
+  return cleaned.trim();
 }
 
 // Checks if a line contains markers typical of a TOC page line (dots, page numbers with tabs)
@@ -310,11 +327,11 @@ export async function processDocxHeadings(
   // Parse and clean outline lines
   const cleanOutlineLines = outlineLines
     ? outlineLines
-        .map(line => line.trim())
+        .map(line => cleanOutlineLine(line))
         .filter(line => {
           if (line.length < 3) return false;
-          // Skip TOC lines with page numbers
-          if (isTOCParagraphText(line)) return false;
+          // Skip if it is just a page/serial number
+          if (/^\d+$/.test(line)) return false;
           return true;
         })
     : [];
