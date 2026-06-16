@@ -246,9 +246,10 @@ export function isTOCParagraph(p: Element): boolean {
 }
 
 // Main logic to parse a docx archive, identify headings, and rewrite word/document.xml
+// Main logic to parse a docx archive, identify headings, and rewrite word/document.xml
 export async function processDocxHeadings(
   docxFile: File,
-  outlineLines: string[] | null
+  outlineLines: { text: string; isHeading1?: boolean }[] | null
 ): Promise<{
   blob: Blob;
   convertedCount: number;
@@ -259,6 +260,7 @@ export async function processDocxHeadings(
   convertedParagraphs: string[];
   unmatchedOutlineTargets: string[];
   skippedAmbiguousMatches: { text: string; reason: string }[];
+  skippedOutlineTargets: string[];
 }> {
   const arrayBuffer = await docxFile.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuffer);
@@ -283,18 +285,80 @@ export async function processDocxHeadings(
   const convertedParagraphs: string[] = [];
   const skippedAmbiguousMatches: { text: string; reason: string }[] = [];
   const unmatchedOutlineTargets: string[] = [];
+  const skippedOutlineTargets: string[] = [];
 
   // Parse and clean outline lines
-  const cleanOutlineLines = outlineLines
-    ? outlineLines
-        .map(line => cleanOutlineLine(line))
-        .filter(line => {
-          if (line.length < 3) return false;
-          // Skip if it is just a page/serial number
-          if (/^\d+$/.test(line)) return false;
-          return true;
-        })
-    : [];
+  const cleanOutlineLines: string[] = [];
+  
+  // Find first non-empty line
+  let firstNonEmptyLine: string | null = null;
+  if (outlineLines) {
+    for (const item of outlineLines) {
+      if (item.text.trim().length > 0) {
+        firstNonEmptyLine = item.text.trim();
+        break;
+      }
+    }
+  }
+
+  if (outlineLines) {
+    for (const item of outlineLines) {
+      const rawText = item.text;
+      const trimmed = rawText.trim();
+      if (trimmed.length === 0) continue;
+
+      // Skip the book title if it is the first non-empty line
+      const isBookTitle = firstNonEmptyLine && trimmed === firstNonEmptyLine;
+
+      // Skip rules based on requested patterns
+      const isContents = /^contents$/i.test(trimmed);
+      const isIntro = /^introduction$/i.test(trimmed);
+      const isConclusion = /^conclusion$/i.test(trimmed);
+      const isBonus = /^bonus$/i.test(trimmed);
+      const isPart = /^part\s+\d+/i.test(trimmed);
+      const isChapterPattern1 = /^chapter\s+\d+/i.test(trimmed);
+      const isChapterPattern2 = /^chapter\s+\d+\s*[–-]/i.test(trimmed);
+      const isChapterPattern3 = /^CHAPTER\s+\d+/i.test(trimmed);
+
+      // TOC page-number lines (ending in page numbers/dot leaders or tab followed by page number)
+      const isTOC = /^.+\t\d+$/.test(trimmed) || isTOCParagraphText(trimmed);
+
+      // Heading 1 style from outline file
+      const isOutlineH1 = !!item.isHeading1;
+
+      if (
+        isBookTitle ||
+        isContents ||
+        isIntro ||
+        isConclusion ||
+        isBonus ||
+        isPart ||
+        isChapterPattern1 ||
+        isChapterPattern2 ||
+        isChapterPattern3 ||
+        isTOC ||
+        isOutlineH1
+      ) {
+        skippedOutlineTargets.push(rawText);
+        continue;
+      }
+
+      // Clean dot leaders and page numbers
+      const cleanedText = cleanOutlineLine(rawText);
+      if (cleanedText.length < 3) {
+        skippedOutlineTargets.push(rawText);
+        continue;
+      }
+
+      // Skip if it is just a number
+      if (/^\d+$/.test(cleanedText)) {
+        skippedOutlineTargets.push(rawText);
+        continue;
+      }
+
+      cleanOutlineLines.push(cleanedText);
+    }
+  }
 
   const totalOutlineTargets = cleanOutlineLines.length;
 
@@ -431,6 +495,7 @@ export async function processDocxHeadings(
     totalOutlineTargets,
     convertedParagraphs,
     unmatchedOutlineTargets,
-    skippedAmbiguousMatches
+    skippedAmbiguousMatches,
+    skippedOutlineTargets
   };
 }

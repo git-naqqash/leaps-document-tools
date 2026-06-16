@@ -101,6 +101,7 @@ export default function Home() {
   const [nrSkippedAmbiguousMatches, setNrSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [nrTotalOutlineTargets, setNrTotalOutlineTargets] = useState(0);
   const [nrOutlineSource, setNrOutlineSource] = useState("");
+  const [nrSkippedOutlineTargets, setNrSkippedOutlineTargets] = useState<string[]>([]);
 
   const nrMainInputRef = useRef<HTMLInputElement>(null);
   const nrOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -126,6 +127,7 @@ export default function Home() {
   const [rSkippedAmbiguousMatches, setRSkippedAmbiguousMatches] = useState<{ text: string; reason: string }[]>([]);
   const [rTotalOutlineTargets, setRTotalOutlineTargets] = useState(0);
   const [rOutlineSource, setROutlineSource] = useState("");
+  const [rSkippedOutlineTargets, setRSkippedOutlineTargets] = useState<string[]>([]);
 
   const rMainInputRef = useRef<HTMLInputElement>(null);
   const rOutlineInputRef = useRef<HTMLInputElement>(null);
@@ -216,9 +218,10 @@ export default function Home() {
     setNrSkippedAmbiguousMatches([]);
     setNrTotalOutlineTargets(0);
     setNrOutlineSource("");
+    setNrSkippedOutlineTargets([]);
 
     try {
-      let outlineLines: string[] | null = null;
+      let outlineLines: { text: string; isHeading1?: boolean }[] | null = null;
       let usedOutline = false;
 
       // 1. Priority check: manual outline text box first
@@ -228,7 +231,7 @@ export default function Home() {
         .filter(line => line.length > 0);
 
       if (cleanManualLines.length > 0) {
-        outlineLines = cleanManualLines;
+        outlineLines = cleanManualLines.map(line => ({ text: line, isHeading1: false }));
         usedOutline = true;
         setNrOutlineLinesCount(cleanManualLines.length);
         setNrUsedOutline(true);
@@ -237,12 +240,12 @@ export default function Home() {
         // 2. Outline file upload second
         setNrMessage("Parsing outline file...");
         const fileLines = await parseOutlineFile(nrOutlineFile);
-        outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
+        outlineLines = fileLines;
         usedOutline = true;
-        setNrOutlineLinesCount(outlineLines.length);
+        setNrOutlineLinesCount(fileLines.length);
         setNrUsedOutline(true);
         setNrOutlineSource(nrOutlineFile.name);
-        if (outlineLines.length === 0) {
+        if (fileLines.length === 0) {
           setNrWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
       }
@@ -257,7 +260,8 @@ export default function Home() {
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches
+        skippedAmbiguousMatches,
+        skippedOutlineTargets
       } = await processDocxHeadings(
         nrMainFile,
         outlineLines
@@ -274,6 +278,7 @@ export default function Home() {
       setNrConvertedParagraphs(convertedParagraphs);
       setNrUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setNrSkippedAmbiguousMatches(skippedAmbiguousMatches);
+      setNrSkippedOutlineTargets(skippedOutlineTargets);
 
       if (convertedCount === 0) {
         setNrStatus("success");
@@ -352,15 +357,16 @@ export default function Home() {
     setROutlineLinesCount(0);
     setRUsedOutline(false);
 
-    // Clear previous report states
+    // Clear previous report stats
     setRConvertedParagraphs([]);
     setRUnmatchedOutlineTargets([]);
     setRSkippedAmbiguousMatches([]);
     setRTotalOutlineTargets(0);
     setROutlineSource("");
+    setRSkippedOutlineTargets([]);
 
     try {
-      let outlineLines: string[] | null = null;
+      let outlineLines: { text: string; isHeading1?: boolean }[] | null = null;
       let usedOutline = false;
 
       // 1. Priority check: manual outline text box first
@@ -370,7 +376,7 @@ export default function Home() {
         .filter(line => line.length > 0);
 
       if (cleanManualLines.length > 0) {
-        outlineLines = cleanManualLines;
+        outlineLines = cleanManualLines.map(line => ({ text: line, isHeading1: false }));
         usedOutline = true;
         setROutlineLinesCount(cleanManualLines.length);
         setRUsedOutline(true);
@@ -379,12 +385,12 @@ export default function Home() {
         // 2. Outline file upload second
         setRMessage("Parsing recipe outline file...");
         const fileLines = await parseOutlineFile(rOutlineFile);
-        outlineLines = fileLines.map(line => line.trim()).filter(line => line.length > 0);
+        outlineLines = fileLines;
         usedOutline = true;
-        setROutlineLinesCount(outlineLines.length);
+        setROutlineLinesCount(fileLines.length);
         setRUsedOutline(true);
         setROutlineSource(rOutlineFile.name);
-        if (outlineLines.length === 0) {
+        if (fileLines.length === 0) {
           setRWarnings(["Uploaded outline file is empty or has no usable lines."]);
         }
       }
@@ -399,7 +405,8 @@ export default function Home() {
         totalOutlineTargets,
         convertedParagraphs,
         unmatchedOutlineTargets,
-        skippedAmbiguousMatches
+        skippedAmbiguousMatches,
+        skippedOutlineTargets
       } = await processDocxHeadings(
         rMainFile,
         outlineLines
@@ -416,6 +423,7 @@ export default function Home() {
       setRConvertedParagraphs(convertedParagraphs);
       setRUnmatchedOutlineTargets(unmatchedOutlineTargets);
       setRSkippedAmbiguousMatches(skippedAmbiguousMatches);
+      setRSkippedOutlineTargets(skippedOutlineTargets);
 
       if (convertedCount === 0) {
         setRStatus("success");
@@ -715,6 +723,18 @@ export default function Home() {
                             </div>
                           )}
 
+                          {/* List of outline lines skipped because they are H1/title/frontmatter */}
+                          {nrSkippedOutlineTargets.length > 0 && (
+                            <div className="pt-2 border-t border-slate-100">
+                              <span className="font-semibold text-slate-500 block mb-1">Outline lines skipped because they are H1/title/frontmatter ({nrSkippedOutlineTargets.length}):</span>
+                              <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-slate-500 space-y-1 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                                {nrSkippedOutlineTargets.map((text, idx) => (
+                                  <div key={idx}>• {text}</div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* List of skipped ambiguous matches */}
                           {nrSkippedAmbiguousMatches.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
@@ -954,6 +974,18 @@ export default function Home() {
                               <span className="font-semibold text-amber-800 block mb-1">Outline targets not found ({rUnmatchedOutlineTargets.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
                                 {rUnmatchedOutlineTargets.map((text, idx) => (
+                                  <div key={idx}>• {text}</div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* List of outline lines skipped because they are H1/title/frontmatter */}
+                          {rSkippedOutlineTargets.length > 0 && (
+                            <div className="pt-2 border-t border-slate-100">
+                              <span className="font-semibold text-slate-500 block mb-1">Outline lines skipped because they are H1/title/frontmatter ({rSkippedOutlineTargets.length}):</span>
+                              <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-slate-500 space-y-1 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                                {rSkippedOutlineTargets.map((text, idx) => (
                                   <div key={idx}>• {text}</div>
                                 ))}
                               </div>
