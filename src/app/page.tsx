@@ -54,6 +54,23 @@ const TrashIcon = () => (
   </svg>
 );
 
+function isSameFile(mainFile: File | null, outlineFile: File | null): boolean {
+  if (!mainFile || !outlineFile) return false;
+
+  return (
+    mainFile.name === outlineFile.name ||
+    (
+      mainFile.name === outlineFile.name &&
+      mainFile.size === outlineFile.size
+    ) ||
+    (
+      mainFile.name === outlineFile.name &&
+      mainFile.size === outlineFile.size &&
+      mainFile.lastModified === outlineFile.lastModified
+    )
+  );
+}
+
 const formatSize = (bytes: number) => {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -178,14 +195,9 @@ export default function Home() {
       return;
     }
 
-    if (
-      nrOutlineFile &&
-      nrMainFile.name === nrOutlineFile.name &&
-      nrMainFile.size === nrOutlineFile.size &&
-      nrMainFile.lastModified === nrOutlineFile.lastModified
-    ) {
+    if (isSameFile(nrMainFile, nrOutlineFile)) {
       setNrStatus("error");
-      setNrMessage("The outline file cannot be the same as the main document. Please upload a separate outline file.");
+      setNrMessage("Error: The outline file cannot be the same as the main document. Please upload a separate outline file.");
       return;
     }
 
@@ -325,14 +337,9 @@ export default function Home() {
       return;
     }
 
-    if (
-      rOutlineFile &&
-      rMainFile.name === rOutlineFile.name &&
-      rMainFile.size === rOutlineFile.size &&
-      rMainFile.lastModified === rOutlineFile.lastModified
-    ) {
+    if (isSameFile(rMainFile, rOutlineFile)) {
       setRStatus("error");
-      setRMessage("The outline file cannot be the same as the main document. Please upload a separate outline file.");
+      setRMessage("Error: The outline file cannot be the same as the main document. Please upload a separate outline file.");
       return;
     }
 
@@ -624,7 +631,7 @@ export default function Home() {
                       </div>
                     )}
                     <p className="text-[11px] text-amber-600 mt-2 font-medium">
-                      ⚠️ Upload a separate outline file only. Do not upload the main manuscript here.
+                      ⚠️ Upload a separate outline file only. Do not upload the same manuscript file here.
                     </p>
                   </div>
                 </div>
@@ -755,9 +762,11 @@ export default function Home() {
                   onClick={runNonRecipeH2}
                   disabled={
                     nrStatus === "processing" ||
-                    !nrMainFile ||
-                    (!nrOutlineFile && !nrOutlineText.trim()) ||
-                    !!(nrMainFile && nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size && nrMainFile.lastModified === nrOutlineFile.lastModified)
+                    !(
+                      nrMainFile &&
+                      (nrOutlineFile || nrOutlineText.trim().length > 0) &&
+                      !isSameFile(nrMainFile, nrOutlineFile)
+                    )
                   }
                   className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
@@ -867,7 +876,7 @@ export default function Home() {
                       </div>
                     )}
                     <p className="text-[11px] text-amber-600 mt-2 font-medium">
-                      ⚠️ Upload a separate outline file only. Do not upload the main manuscript here.
+                      ⚠️ Upload a separate outline file only. Do not upload the same manuscript file here.
                     </p>
                   </div>
                 </div>
@@ -998,9 +1007,11 @@ export default function Home() {
                   onClick={runRecipeH2}
                   disabled={
                     rStatus === "processing" ||
-                    !rMainFile ||
-                    (!rOutlineFile && !rOutlineText.trim()) ||
-                    !!(rMainFile && rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size && rMainFile.lastModified === rOutlineFile.lastModified)
+                    !(
+                      rMainFile &&
+                      (rOutlineFile || rOutlineText.trim().length > 0) &&
+                      !isSameFile(rMainFile, rOutlineFile)
+                    )
                   }
                   className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
