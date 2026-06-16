@@ -174,13 +174,18 @@ export default function Home() {
     const manualOutlineText = nrOutlineText.trim();
     if (!nrOutlineFile && !manualOutlineText) {
       setNrStatus("error");
-      setNrMessage("Please upload or paste the outline first. Outline is required for accurate H2 formatting.");
+      setNrMessage("Please upload or paste a separate outline first. Outline is required.");
       return;
     }
 
-    if (nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size) {
+    if (
+      nrOutlineFile &&
+      nrMainFile.name === nrOutlineFile.name &&
+      nrMainFile.size === nrOutlineFile.size &&
+      nrMainFile.lastModified === nrOutlineFile.lastModified
+    ) {
       setNrStatus("error");
-      setNrMessage("Please upload a separate outline file. The main document cannot be used as the outline.");
+      setNrMessage("The outline file cannot be the same as the main document. Please upload a separate outline file.");
       return;
     }
 
@@ -316,13 +321,18 @@ export default function Home() {
     const manualOutlineText = rOutlineText.trim();
     if (!rOutlineFile && !manualOutlineText) {
       setRStatus("error");
-      setRMessage("Please upload or paste the outline first. Outline is required for accurate H2 formatting.");
+      setRMessage("Please upload or paste a separate outline first. Outline is required.");
       return;
     }
 
-    if (rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size) {
+    if (
+      rOutlineFile &&
+      rMainFile.name === rOutlineFile.name &&
+      rMainFile.size === rOutlineFile.size &&
+      rMainFile.lastModified === rOutlineFile.lastModified
+    ) {
       setRStatus("error");
-      setRMessage("Please upload a separate outline file. The main document cannot be used as the outline.");
+      setRMessage("The outline file cannot be the same as the main document. Please upload a separate outline file.");
       return;
     }
 
@@ -581,7 +591,7 @@ export default function Home() {
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Required Outline File (.docx, .txt)
+                      Required Outline File (.DOCX, .TXT)
                     </label>
                     {nrOutlineFile ? (
                       <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -613,6 +623,9 @@ export default function Home() {
                         />
                       </div>
                     )}
+                    <p className="text-[11px] text-amber-600 mt-2 font-medium">
+                      ⚠️ Upload a separate outline file only. Do not upload the main manuscript here.
+                    </p>
                   </div>
                 </div>
 
@@ -646,11 +659,11 @@ export default function Home() {
                     {nrStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
                         <div className="grid grid-cols-2 gap-3 bg-slate-100/60 p-3 rounded-lg border border-slate-200/50 font-medium text-slate-700">
-                          <div className="col-span-2"><span className="text-slate-500">Main DOCX:</span> <span className="font-bold text-slate-900">{nrMainFile?.name}</span></div>
-                          <div className="col-span-2"><span className="text-slate-500">Outline Source:</span> <span className="font-bold text-slate-900">{nrOutlineSource}</span></div>
-                          <div><span className="text-slate-500">Total Outline Targets:</span> <span className="font-bold text-slate-900">{nrTotalOutlineTargets}</span></div>
-                          <div><span className="text-slate-500">Converted by Exact Match:</span> <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
-                          <div><span className="text-slate-500">Auto Detections Used:</span> <span className="font-bold text-slate-900">0</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Main DOCX file name:</span> <span className="font-bold text-slate-900">{nrMainFile?.name}</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Outline source file name or pasted outline:</span> <span className="font-bold text-slate-900">{nrOutlineSource}</span></div>
+                          <div><span className="text-slate-500">Total outline targets extracted:</span> <span className="font-bold text-slate-900">{nrTotalOutlineTargets}</span></div>
+                          <div><span className="text-slate-500">Total paragraphs converted by exact outline match:</span> <span className="font-bold text-slate-900">{nrConvertedCount}</span></div>
+                          <div><span className="text-slate-500">Total automatic detections used:</span> <span className="font-bold text-slate-900">0</span></div>
                           <div><span className="text-slate-500">Skipped H1 matches:</span> <span className="font-bold text-slate-900">{nrSkippedH1Count}</span></div>
                           <div><span className="text-slate-500">Original file size:</span> <span className="font-bold text-slate-900">{formatSize(nrOriginalSize)}</span></div>
                           <div><span className="text-slate-500">Output file size:</span> <span className="font-bold text-slate-900">{formatSize(nrOutputSize)}</span></div>
@@ -674,7 +687,7 @@ export default function Home() {
                           {/* List of converted paragraph texts */}
                           {nrConvertedParagraphs.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
-                              <span className="font-semibold text-slate-700 block mb-1">Converted Paragraphs ({nrConvertedParagraphs.length}):</span>
+                              <span className="font-semibold text-slate-700 block mb-1">Converted paragraph list ({nrConvertedParagraphs.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-slate-600 space-y-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
                                 {nrConvertedParagraphs.map((text, idx) => (
                                   <div key={idx}>• {text}</div>
@@ -686,7 +699,7 @@ export default function Home() {
                           {/* List of outline targets not found */}
                           {nrUnmatchedOutlineTargets.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
-                              <span className="font-semibold text-amber-800 block mb-1">Outline Targets Not Found ({nrUnmatchedOutlineTargets.length}):</span>
+                              <span className="font-semibold text-amber-800 block mb-1">Outline targets not found ({nrUnmatchedOutlineTargets.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
                                 {nrUnmatchedOutlineTargets.map((text, idx) => (
                                   <div key={idx}>• {text}</div>
@@ -744,7 +757,7 @@ export default function Home() {
                     nrStatus === "processing" ||
                     !nrMainFile ||
                     (!nrOutlineFile && !nrOutlineText.trim()) ||
-                    !!(nrMainFile && nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size)
+                    !!(nrMainFile && nrOutlineFile && nrMainFile.name === nrOutlineFile.name && nrMainFile.size === nrOutlineFile.size && nrMainFile.lastModified === nrOutlineFile.lastModified)
                   }
                   className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
@@ -821,7 +834,7 @@ export default function Home() {
                   {/* Outline File */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Required Outline File (.docx, .txt)
+                      Required Outline File (.DOCX, .TXT)
                     </label>
                     {rOutlineFile ? (
                       <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -853,6 +866,9 @@ export default function Home() {
                         />
                       </div>
                     )}
+                    <p className="text-[11px] text-amber-600 mt-2 font-medium">
+                      ⚠️ Upload a separate outline file only. Do not upload the main manuscript here.
+                    </p>
                   </div>
                 </div>
 
@@ -886,11 +902,11 @@ export default function Home() {
                     {rStatus === "success" && (
                       <div className="mt-3 pt-3 border-t border-slate-200/50 text-xs space-y-3 text-slate-600">
                         <div className="grid grid-cols-2 gap-3 bg-slate-100/60 p-3 rounded-lg border border-slate-200/50 font-medium text-slate-700">
-                          <div className="col-span-2"><span className="text-slate-500">Main DOCX:</span> <span className="font-bold text-slate-900">{rMainFile?.name}</span></div>
-                          <div className="col-span-2"><span className="text-slate-500">Outline Source:</span> <span className="font-bold text-slate-900">{rOutlineSource}</span></div>
-                          <div><span className="text-slate-500">Total Outline Targets:</span> <span className="font-bold text-slate-900">{rTotalOutlineTargets}</span></div>
-                          <div><span className="text-slate-500">Converted by Exact Match:</span> <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
-                          <div><span className="text-slate-500">Auto Detections Used:</span> <span className="font-bold text-slate-900">0</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Main DOCX file name:</span> <span className="font-bold text-slate-900">{rMainFile?.name}</span></div>
+                          <div className="col-span-2"><span className="text-slate-500">Outline source file name or pasted outline:</span> <span className="font-bold text-slate-900">{rOutlineSource}</span></div>
+                          <div><span className="text-slate-500">Total outline targets extracted:</span> <span className="font-bold text-slate-900">{rTotalOutlineTargets}</span></div>
+                          <div><span className="text-slate-500">Total paragraphs converted by exact outline match:</span> <span className="font-bold text-slate-900">{rConvertedCount}</span></div>
+                          <div><span className="text-slate-500">Total automatic detections used:</span> <span className="font-bold text-slate-900">0</span></div>
                           <div><span className="text-slate-500">Skipped H1 matches:</span> <span className="font-bold text-slate-900">{rSkippedH1Count}</span></div>
                           <div><span className="text-slate-500">Original file size:</span> <span className="font-bold text-slate-900">{formatSize(rOriginalSize)}</span></div>
                           <div><span className="text-slate-500">Output file size:</span> <span className="font-bold text-slate-900">{formatSize(rOutputSize)}</span></div>
@@ -914,7 +930,7 @@ export default function Home() {
                           {/* List of converted paragraph texts */}
                           {rConvertedParagraphs.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
-                              <span className="font-semibold text-slate-700 block mb-1">Converted Paragraphs ({rConvertedParagraphs.length}):</span>
+                              <span className="font-semibold text-slate-700 block mb-1">Converted paragraph list ({rConvertedParagraphs.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-slate-600 space-y-1 bg-slate-50 p-2 rounded-lg border border-slate-100">
                                 {rConvertedParagraphs.map((text, idx) => (
                                   <div key={idx}>• {text}</div>
@@ -926,7 +942,7 @@ export default function Home() {
                           {/* List of outline targets not found */}
                           {rUnmatchedOutlineTargets.length > 0 && (
                             <div className="pt-2 border-t border-slate-100">
-                              <span className="font-semibold text-amber-800 block mb-1">Outline Targets Not Found ({rUnmatchedOutlineTargets.length}):</span>
+                              <span className="font-semibold text-amber-800 block mb-1">Outline targets not found ({rUnmatchedOutlineTargets.length}):</span>
                               <div className="max-h-[100px] overflow-y-auto font-mono text-[10px] text-amber-700 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
                                 {rUnmatchedOutlineTargets.map((text, idx) => (
                                   <div key={idx}>• {text}</div>
@@ -984,7 +1000,7 @@ export default function Home() {
                     rStatus === "processing" ||
                     !rMainFile ||
                     (!rOutlineFile && !rOutlineText.trim()) ||
-                    !!(rMainFile && rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size)
+                    !!(rMainFile && rOutlineFile && rMainFile.name === rOutlineFile.name && rMainFile.size === rOutlineFile.size && rMainFile.lastModified === rOutlineFile.lastModified)
                   }
                   className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm hover:shadow active:scale-[0.99] flex items-center justify-center"
                 >
